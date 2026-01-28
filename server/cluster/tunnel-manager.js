@@ -264,14 +264,13 @@ class TunnelManager {
 
     const requestId = randomUUID();
 
-    // Collect request body
+    // Get request body - Express has already parsed it via express.json()
+    // Don't try to read from stream as it's already consumed
     let body = null;
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      const chunks = [];
-      for await (const chunk of request) {
-        chunks.push(chunk);
+      if (request.body && Object.keys(request.body).length > 0) {
+        body = JSON.stringify(request.body);
       }
-      body = Buffer.concat(chunks).toString('utf-8');
     }
 
     return new Promise((resolve, reject) => {
