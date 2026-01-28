@@ -291,9 +291,15 @@ app.use('/api/cluster', authenticateToken, (req, res, next) => {
 });
 
 // Request router middleware for master mode - routes requests to slaves based on X-Target-Slave header
-// Must be applied before protected routes so it can intercept and forward requests
+// Must be before all API routes so it can intercept and forward requests to slaves
 if (DEPLOYMENT_MODE === 'master') {
     console.log(`${c.info('[CLUSTER]')} Master mode: Request routing enabled`);
+    app.use('/api', (req, res, next) => {
+        const tm = req.app.locals.tunnelManager;
+        if (!tm) return next();
+        const router = createRequestRouter(tm);
+        router(req, res, next);
+    });
 }
 
 // Projects API Routes (protected)
@@ -1866,10 +1872,6 @@ async function startServer() {
             if (!process.env.CLUSTER_SECRET) {
                 console.log(`${c.warn('[CLUSTER]')} Warning: CLUSTER_SECRET not set - slaves cannot authenticate`);
             }
-
-            // Add request router middleware for master mode
-            // This must be added after tunnelManager is initialized
-            app.use('/api', createRequestRouter(tunnelManager));
         } else if (DEPLOYMENT_MODE === 'slave') {
             tunnelClient = new TunnelClient({
                 masterUrl: process.env.MASTER_URL,
