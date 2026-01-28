@@ -152,8 +152,16 @@ class TunnelClient {
   async handleHttpRequest(message) {
     const { requestId, method, path, headers, body } = message;
 
+    console.log(`[TunnelClient] HTTP Request: ${method} ${path}`);
+    console.log(`[TunnelClient] Headers:`, JSON.stringify(headers, null, 2));
+
     try {
       const response = await this.forwardToLocal(method, path, headers, body);
+
+      console.log(`[TunnelClient] HTTP Response: ${response.status} for ${method} ${path}`);
+      if (response.status >= 400) {
+        console.log(`[TunnelClient] Error response body:`, response.body.substring(0, 500));
+      }
 
       this.send({
         type: 'response',
@@ -164,6 +172,7 @@ class TunnelClient {
       });
     } catch (error) {
       console.error('[TunnelClient] Error forwarding request:', error.message);
+      console.error('[TunnelClient] Stack:', error.stack);
 
       this.send({
         type: 'response',

@@ -15,8 +15,11 @@ function createRequestRouter(tunnelManager) {
       return next();
     }
 
+    console.log(`[RequestRouter] Forwarding ${req.method} ${req.url} to slave: ${targetSlave}`);
+
     // Check if slave is connected
     if (!tunnelManager.isSlaveConnected(targetSlave)) {
+      console.log(`[RequestRouter] Slave not connected: ${targetSlave}`);
       return res.status(503).json({
         error: 'Slave not connected',
         slaveId: targetSlave,
@@ -27,6 +30,8 @@ function createRequestRouter(tunnelManager) {
     try {
       // Forward request through tunnel
       const response = await tunnelManager.forwardHttpRequest(targetSlave, req);
+
+      console.log(`[RequestRouter] Response from slave ${targetSlave}: ${response.status}`);
 
       // Set response headers
       for (const [key, value] of Object.entries(response.headers)) {

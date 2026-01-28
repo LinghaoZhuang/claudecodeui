@@ -329,9 +329,12 @@ class TunnelManager {
       }
     }
 
+    console.log(`[TunnelManager] Forwarding HTTP ${request.method} ${request.url} to slave ${slaveId}`);
+
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
+        console.error(`[TunnelManager] HTTP request timeout for ${requestId}`);
         reject(new Error('Request timeout'));
       }, this.requestTimeout);
 
