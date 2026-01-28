@@ -186,7 +186,9 @@ class TunnelClient {
         headers: {
           ...headers,
           // Ensure host header points to local
-          host: `localhost:${this.localPort}`
+          host: `localhost:${this.localPort}`,
+          // Add cluster internal auth header - slave auth middleware will trust this
+          'x-cluster-internal-auth': this.secret
         }
       };
 

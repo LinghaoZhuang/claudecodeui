@@ -20,6 +20,17 @@ const validateApiKey = (req, res, next) => {
 
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
+  // Cluster internal authentication - for requests forwarded through tunnel
+  // If valid CLUSTER_SECRET is provided, skip JWT verification (trusted internal request)
+  const clusterInternalAuth = req.headers['x-cluster-internal-auth'];
+  const clusterSecret = process.env.CLUSTER_SECRET;
+
+  if (clusterInternalAuth && clusterSecret && clusterInternalAuth === clusterSecret) {
+    // Trusted cluster internal request - use a system user context
+    req.user = { id: 0, username: 'cluster-internal', isClusterInternal: true };
+    return next();
+  }
+
   // Platform mode:  use single database user
   if (process.env.VITE_IS_PLATFORM === 'true') {
     try {
