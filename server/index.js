@@ -836,8 +836,10 @@ wss.on('connection', (ws, request) => {
     // Route to slave if specified and in master mode
     if (targetSlave && targetSlave !== 'local' && DEPLOYMENT_MODE === 'master' && tunnelManager) {
         const channel = pathname === '/shell' ? 'shell' : 'ws';
+        // Extract token from URL to pass through tunnel for slave authentication
+        const token = urlObj.searchParams.get('token');
         try {
-            tunnelManager.createWsTunnel(targetSlave, ws, channel);
+            tunnelManager.createWsTunnel(targetSlave, ws, channel, token);
             console.log(`[INFO] WebSocket tunneled to slave: ${targetSlave} (${channel})`);
         } catch (error) {
             console.error(`[ERROR] Failed to create WebSocket tunnel to ${targetSlave}:`, error.message);

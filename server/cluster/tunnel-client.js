@@ -234,12 +234,14 @@ class TunnelClient {
    * Handle WebSocket tunnel open request
    */
   handleWsTunnelOpen(message) {
-    const { tunnelId, channel } = message;
+    const { tunnelId, channel, token } = message;
 
     try {
       // Determine local WebSocket path based on channel
       const wsPath = channel === 'shell' ? '/shell' : '/ws';
-      const localWsUrl = `ws://localhost:${this.localPort}${wsPath}`;
+      // Include token in the WebSocket URL for authentication
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      const localWsUrl = `ws://localhost:${this.localPort}${wsPath}${tokenParam}`;
 
       const localWs = new WebSocket(localWsUrl);
 

@@ -6,6 +6,14 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useTranslation } from 'react-i18next';
 
+// Remote server for Capacitor environment
+const REMOTE_SERVER = 'code.zaneleo.top';
+
+// Check if running in Capacitor environment
+const isCapacitor = () => {
+  return typeof window !== 'undefined' && window.Capacitor !== undefined;
+};
+
 const xtermStyles = `
   .xterm .xterm-screen {
     outline: none !important;
@@ -58,7 +66,14 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
       const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
       let wsUrl;
 
-      if (isPlatform) {
+      if (isCapacitor()) {
+        // Capacitor mode: Connect to remote server
+        const token = localStorage.getItem('auth-token');
+        wsUrl = `wss://${REMOTE_SERVER}/shell`;
+        if (token) {
+          wsUrl += `?token=${encodeURIComponent(token)}`;
+        }
+      } else if (isPlatform) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${window.location.host}/shell`;
       } else {

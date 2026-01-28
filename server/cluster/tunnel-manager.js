@@ -296,8 +296,12 @@ class TunnelManager {
 
   /**
    * Create WebSocket tunnel to slave
+   * @param {string} slaveId - Target slave ID
+   * @param {WebSocket} localWs - Local WebSocket connection from user
+   * @param {string} channel - Channel type ('ws' or 'shell')
+   * @param {string} token - User's JWT token for authentication on slave
    */
-  createWsTunnel(slaveId, localWs, channel) {
+  createWsTunnel(slaveId, localWs, channel, token) {
     const slave = this.slaves.get(slaveId);
 
     if (!slave || slave.ws.readyState !== WebSocket.OPEN) {
@@ -313,11 +317,12 @@ class TunnelManager {
       channel
     });
 
-    // Request tunnel creation on slave
+    // Request tunnel creation on slave with token for authentication
     slave.ws.send(JSON.stringify({
       type: 'ws_tunnel_open',
       tunnelId,
-      channel
+      channel,
+      token  // Pass user's JWT token to slave
     }));
 
     // Handle messages from local WebSocket

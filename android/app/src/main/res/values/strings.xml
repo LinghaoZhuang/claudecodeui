@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Claude Code UI</string>
+    <string name="title_activity_main">Claude Code UI</string>
+    <string name="package_name">top.zaneleo.claudeui</string>
+    <string name="custom_url_scheme">top.zaneleo.claudeui</string>
+</resources>
