@@ -1777,24 +1777,34 @@ function permToRwx(perm) {
     return r + w + x;
 }
 
-async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true) {
+async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true, fileCount = { count: 0, limit: 5000 }) {
     // Using fsPromises from import
     const items = [];
+
+    // Stop if we've hit the file limit
+    if (fileCount.count >= fileCount.limit) {
+        return items;
+    }
 
     try {
         const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
 
         for (const entry of entries) {
-            // Debug: log all entries including hidden files
+            // Stop if we've hit the file limit
+            if (fileCount.count >= fileCount.limit) {
+                break;
+            }
 
-
-            // Skip heavy build directories and VCS directories
-            if (entry.name === 'node_modules' ||
-                entry.name === 'dist' ||
-                entry.name === 'build' ||
-                entry.name === '.git' ||
-                entry.name === '.svn' ||
-                entry.name === '.hg') continue;
+            // Skip only directories that are known to cause OOM (thousands of files)
+            const skipDirs = [
+                'node_modules', '.git', '.svn', '.hg',
+                '__pycache__', '.pytest_cache',
+                'venv', '.venv', '.conda',
+                '.tox', '.nox',
+                '.next', '.nuxt',
+                '.cache', '__MACOSX'
+            ];
+            if (skipDirs.includes(entry.name)) continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {
@@ -1829,13 +1839,14 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
                 try {
                     // Check if we can access the directory before trying to read it
                     await fsPromises.access(item.path, fs.constants.R_OK);
-                    item.children = await getFileTree(item.path, maxDepth, currentDepth + 1, showHidden);
+                    item.children = await getFileTree(item.path, maxDepth, currentDepth + 1, showHidden, fileCount);
                 } catch (e) {
                     // Silently skip directories we can't access (permission denied, etc.)
                     item.children = [];
                 }
             }
 
+            fileCount.count++;
             items.push(item);
         }
     } catch (error) {
