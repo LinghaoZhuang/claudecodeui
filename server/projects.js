@@ -590,27 +590,6 @@ async function getProjects(progressCallback = null) {
     });
   }
 
-  // Sort projects by most recent session activity (newest first)
-  projects.sort((a, b) => {
-    // Get most recent session from each project (including all session types)
-    const getLatestActivity = (project) => {
-      const allSessions = [
-        ...(project.sessions || []),
-        ...(project.cursorSessions || []),
-        ...(project.codexSessions || [])
-      ];
-      if (allSessions.length === 0) return new Date(0);
-
-      // Find the most recent lastActivity or createdAt
-      return allSessions.reduce((latest, session) => {
-        const sessionTime = new Date(session.lastActivity || session.createdAt || 0);
-        return sessionTime > latest ? sessionTime : latest;
-      }, new Date(0));
-    };
-
-    return getLatestActivity(b) - getLatestActivity(a);
-  });
-
   return projects;
 }
 
