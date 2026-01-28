@@ -154,8 +154,16 @@ class TunnelManager {
         this.handleWsTunnelData(message);
         break;
 
+      case 'ws_tunnel_ready':
+        this.handleWsTunnelReady(message);
+        break;
+
       case 'ws_tunnel_closed':
         this.handleWsTunnelClosed(message);
+        break;
+
+      case 'ws_tunnel_error':
+        this.handleWsTunnelError(message);
         break;
 
       case 'ping':
@@ -220,6 +228,54 @@ class TunnelManager {
     if (tunnel) {
       if (tunnel.localWs && tunnel.localWs.readyState === WebSocket.OPEN) {
         tunnel.localWs.close();
+      }
+      this.tunnels.delete(tunnelId);
+    }
+  }
+
+  /**
+   * Handle WebSocket tunnel ready confirmation from slave
+   */
+  handleWsTunnelReady(message) {
+    const { tunnelId } = message;
+    const tunnel = this.tunnels.get(tunnelId);
+
+    if (!tunnel) {
+      console.warn(`[TunnelManager] No tunnel found for ready message: ${tunnelId}`);
+      return;
+    }
+
+    console.log(`[TunnelManager] Tunnel ready: ${tunnelId}`);
+    tunnel.ready = true;
+
+    // Flush any buffered messages
+    if (tunnel.buffer && tunnel.buffer.length > 0) {
+      console.log(`[TunnelManager] Flushing ${tunnel.buffer.length} buffered messages for tunnel ${tunnelId}`);
+      const slave = this.slaves.get(tunnel.slaveId);
+      if (slave && slave.ws.readyState === WebSocket.OPEN) {
+        for (const data of tunnel.buffer) {
+          slave.ws.send(JSON.stringify({
+            type: 'ws_message',
+            tunnelId,
+            data
+          }));
+        }
+      }
+      tunnel.buffer = [];
+    }
+  }
+
+  /**
+   * Handle WebSocket tunnel error from slave
+   */
+  handleWsTunnelError(message) {
+    const { tunnelId, error } = message;
+    console.error(`[TunnelManager] Tunnel error for ${tunnelId}:`, error);
+
+    const tunnel = this.tunnels.get(tunnelId);
+    if (tunnel) {
+      if (tunnel.localWs && tunnel.localWs.readyState === WebSocket.OPEN) {
+        tunnel.localWs.close(1011, `Slave tunnel error: ${error}`);
       }
       this.tunnels.delete(tunnelId);
     }
@@ -309,11 +365,13 @@ class TunnelManager {
 
     const tunnelId = randomUUID();
 
-    // Store tunnel mapping
+    // Store tunnel mapping with ready state and message buffer
     this.tunnels.set(tunnelId, {
       slaveId,
       localWs,
-      channel
+      channel,
+      ready: false,  // Will be set true when slave confirms ready
+      buffer: []     // Buffer messages until tunnel is ready
     });
 
     // Request tunnel creation on slave with token for authentication
@@ -324,14 +382,26 @@ class TunnelManager {
       token  // Pass user's JWT token to slave
     }));
 
-    // Handle messages from local WebSocket
+    // Handle messages from local WebSocket (browser)
     localWs.on('message', (data) => {
-      if (slave.ws.readyState === WebSocket.OPEN) {
-        slave.ws.send(JSON.stringify({
-          type: 'ws_message',
-          tunnelId,
-          data: data.toString()
-        }));
+      const tunnel = this.tunnels.get(tunnelId);
+      if (!tunnel) return;
+
+      const dataStr = data.toString();
+
+      if (tunnel.ready) {
+        // Tunnel is ready, send directly
+        if (slave.ws.readyState === WebSocket.OPEN) {
+          slave.ws.send(JSON.stringify({
+            type: 'ws_message',
+            tunnelId,
+            data: dataStr
+          }));
+        }
+      } else {
+        // Tunnel not ready yet, buffer the message
+        console.log(`[TunnelManager] Buffering message for tunnel ${tunnelId} (not ready yet)`);
+        tunnel.buffer.push(dataStr);
       }
     });
 

@@ -245,11 +245,18 @@ class TunnelClient {
       const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
       const localWsUrl = `ws://localhost:${this.localPort}${wsPath}${tokenParam}`;
 
+      console.log(`[TunnelClient] Opening local WebSocket tunnel: ${tunnelId} (${channel})`);
       const localWs = new WebSocket(localWsUrl);
 
       localWs.on('open', () => {
         console.log(`[TunnelClient] Local WebSocket tunnel opened: ${tunnelId} (${channel})`);
         this.localTunnels.set(tunnelId, localWs);
+
+        // Send ready confirmation to master - tunnel is now ready to receive messages
+        this.send({
+          type: 'ws_tunnel_ready',
+          tunnelId
+        });
       });
 
       localWs.on('message', (data) => {
@@ -272,13 +279,20 @@ class TunnelClient {
 
       localWs.on('error', (error) => {
         console.error(`[TunnelClient] Local WebSocket error for tunnel ${tunnelId}:`, error.message);
+        this.localTunnels.delete(tunnelId);
+
+        this.send({
+          type: 'ws_tunnel_error',
+          tunnelId,
+          error: error.message
+        });
       });
 
     } catch (error) {
       console.error(`[TunnelClient] Error opening tunnel ${tunnelId}:`, error.message);
 
       this.send({
-        type: 'error',
+        type: 'ws_tunnel_error',
         tunnelId,
         error: error.message
       });
