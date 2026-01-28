@@ -9,9 +9,21 @@ import { useTranslation } from 'react-i18next';
 // Remote server for Capacitor environment
 const REMOTE_SERVER = 'code.zaneleo.top';
 
+// Storage key for selected cluster client
+const SELECTED_CLIENT_KEY = 'cluster-selected-client';
+
 // Check if running in Capacitor environment
 const isCapacitor = () => {
   return typeof window !== 'undefined' && window.Capacitor !== undefined;
+};
+
+// Get selected cluster client ID
+const getSelectedClientId = () => {
+  try {
+    return localStorage.getItem(SELECTED_CLIENT_KEY) || 'local';
+  } catch {
+    return 'local';
+  }
 };
 
 const xtermStyles = `
@@ -64,6 +76,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
     try {
       const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
+      const selectedClient = getSelectedClientId();
       let wsUrl;
 
       if (isCapacitor()) {
@@ -73,9 +86,17 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
         if (token) {
           wsUrl += `?token=${encodeURIComponent(token)}`;
         }
+        // Add slave parameter if not local
+        if (selectedClient && selectedClient !== 'local') {
+          wsUrl += `${wsUrl.includes('?') ? '&' : '?'}_slave=${encodeURIComponent(selectedClient)}`;
+        }
       } else if (isPlatform) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${window.location.host}/shell`;
+        // Add slave parameter if not local
+        if (selectedClient && selectedClient !== 'local') {
+          wsUrl += `?_slave=${encodeURIComponent(selectedClient)}`;
+        }
       } else {
         const token = localStorage.getItem('auth-token');
         if (!token) {
@@ -85,6 +106,10 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
+        // Add slave parameter if not local
+        if (selectedClient && selectedClient !== 'local') {
+          wsUrl += `&_slave=${encodeURIComponent(selectedClient)}`;
+        }
       }
 
       ws.current = new WebSocket(wsUrl);
