@@ -282,10 +282,13 @@ app.use('/api', validateApiKey);
 // Authentication routes (public)
 app.use('/api/auth', authRoutes);
 
-// Cluster routes - available only in master mode, but status endpoint works everywhere
-// This is mounted early so it's available for the request router setup
-const clusterRoutes = createClusterRoutes(tunnelManager);
-app.use('/api/cluster', authenticateToken, clusterRoutes);
+// Cluster routes - uses app.locals.tunnelManager which is set in startServer()
+app.use('/api/cluster', authenticateToken, (req, res, next) => {
+    // Dynamically get tunnelManager from app.locals
+    const tm = req.app.locals.tunnelManager;
+    const clusterRouter = createClusterRoutes(tm);
+    clusterRouter(req, res, next);
+});
 
 // Request router middleware for master mode - routes requests to slaves based on X-Target-Slave header
 // Must be applied before protected routes so it can intercept and forward requests
@@ -1855,6 +1858,8 @@ async function startServer() {
             tunnelManager = new TunnelManager({
                 secret: process.env.CLUSTER_SECRET
             });
+            // Store in app.locals so routes can access it dynamically
+            app.locals.tunnelManager = tunnelManager;
             console.log(`${c.info('[CLUSTER]')} Running in MASTER mode`);
             if (!process.env.CLUSTER_SECRET) {
                 console.log(`${c.warn('[CLUSTER]')} Warning: CLUSTER_SECRET not set - slaves cannot authenticate`);
