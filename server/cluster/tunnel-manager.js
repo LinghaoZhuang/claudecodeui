@@ -329,7 +329,11 @@ class TunnelManager {
       }
     }
 
-    console.log(`[TunnelManager] Forwarding HTTP ${request.method} ${request.url} to slave ${slaveId}`);
+    // Use originalUrl to get full path including /api prefix
+    // req.url is relative to middleware mount point, req.originalUrl is the full path
+    const fullPath = request.originalUrl;
+
+    console.log(`[TunnelManager] Forwarding HTTP ${request.method} ${fullPath} to slave ${slaveId}`);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -345,7 +349,7 @@ class TunnelManager {
         type: 'http_request',
         requestId,
         method: request.method,
-        path: request.url,
+        path: fullPath,  // Use full path including /api prefix
         headers: this.sanitizeHeaders(request.headers),
         body
       }));
