@@ -26,8 +26,20 @@ const authenticateToken = async (req, res, next) => {
   const clusterSecret = process.env.CLUSTER_SECRET;
 
   if (clusterInternalAuth && clusterSecret && clusterInternalAuth === clusterSecret) {
-    // Trusted cluster internal request - use a system user context
-    req.user = { id: 0, username: 'cluster-internal', isClusterInternal: true };
+    // Trusted cluster internal request - use first user from local database
+    try {
+      const user = userDb.getFirstUser();
+      if (user) {
+        req.user = user;
+        req.isClusterInternal = true;
+        return next();
+      }
+    } catch (err) {
+      console.error('Cluster internal auth: failed to get local user:', err);
+    }
+    // Fallback if no user found
+    req.user = { id: 1, username: 'cluster-internal' };
+    req.isClusterInternal = true;
     return next();
   }
 
