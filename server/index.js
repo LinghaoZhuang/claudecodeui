@@ -206,6 +206,16 @@ const wss = new WebSocketServer({
     verifyClient: (info) => {
         console.log('WebSocket connection attempt to:', info.req.url);
 
+        // Parse URL to check path
+        const url = new URL(info.req.url, 'http://localhost');
+        const pathname = url.pathname;
+
+        // Allow cluster tunnel connections without JWT (they authenticate via CLUSTER_SECRET)
+        if (pathname === '/cluster/tunnel') {
+            console.log('[OK] Cluster tunnel connection allowed (will authenticate via CLUSTER_SECRET)');
+            return true;
+        }
+
         // Platform mode: always allow connection
         if (process.env.VITE_IS_PLATFORM === 'true') {
             const user = authenticateWebSocket(null); // Will return first user
@@ -220,7 +230,6 @@ const wss = new WebSocketServer({
 
         // Normal mode: verify token
         // Extract token from query parameters or headers
-        const url = new URL(info.req.url, 'http://localhost');
         const token = url.searchParams.get('token') ||
             info.req.headers.authorization?.split(' ')[1];
 
