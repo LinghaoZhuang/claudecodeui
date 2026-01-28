@@ -409,6 +409,12 @@ class TunnelManager {
     // Remove our custom header
     delete sanitized['x-target-slave'];
 
+    // Remove auth headers - slave uses x-cluster-internal-auth instead
+    delete sanitized['authorization'];
+
+    // Remove content-length as it may be stale after Express body parsing
+    delete sanitized['content-length'];
+
     return sanitized;
   }
 }
