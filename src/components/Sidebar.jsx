@@ -13,6 +13,7 @@ import CursorLogo from './CursorLogo.jsx';
 import CodexLogo from './CodexLogo.jsx';
 import TaskIndicator from './TaskIndicator';
 import ProjectCreationWizard from './ProjectCreationWizard';
+import ClientSelector from './ClientSelector';
 import { api } from '../utils/api';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
@@ -723,6 +724,9 @@ function Sidebar({
           </div>
         </div>
       </div>
+
+      {/* Client Selector - Only shown in master mode */}
+      <ClientSelector className="mx-3 md:mx-4 my-2" />
 
       {/* Action Buttons - Desktop only - Always show when not loading */}
       {!isLoading && !isMobile && (

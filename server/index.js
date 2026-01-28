@@ -76,6 +76,13 @@ import userRoutes from './routes/user.js';
 import codexRoutes from './routes/codex.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import { TunnelManager, TunnelClient, createRequestRouter } from './cluster/index.js';
+import createClusterRoutes from './routes/cluster.js';
+
+// Cluster mode variables
+const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'standalone';
+let tunnelManager = null;
+let tunnelClient = null;
 
 // File system watcher for projects folder
 let projectsWatcher = null;
@@ -234,7 +241,10 @@ const wss = new WebSocketServer({
 // Make WebSocket server available to routes
 app.locals.wss = wss;
 
-app.use(cors());
+app.use(cors({
+  origin: ['https://localhost', 'capacitor://localhost', 'http://localhost:5173', 'http://localhost'],
+  credentials: true
+}));
 app.use(express.json({
   limit: '50mb',
   type: (req) => {
@@ -252,7 +262,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    mode: DEPLOYMENT_MODE
   });
 });
 
@@ -261,6 +272,17 @@ app.use('/api', validateApiKey);
 
 // Authentication routes (public)
 app.use('/api/auth', authRoutes);
+
+// Cluster routes - available only in master mode, but status endpoint works everywhere
+// This is mounted early so it's available for the request router setup
+const clusterRoutes = createClusterRoutes(tunnelManager);
+app.use('/api/cluster', authenticateToken, clusterRoutes);
+
+// Request router middleware for master mode - routes requests to slaves based on X-Target-Slave header
+// Must be applied before protected routes so it can intercept and forward requests
+if (DEPLOYMENT_MODE === 'master') {
+    console.log(`${c.info('[CLUSTER]')} Master mode: Request routing enabled`);
+}
 
 // Projects API Routes (protected)
 app.use('/api/projects', authenticateToken, projectsRoutes);
@@ -785,6 +807,34 @@ wss.on('connection', (ws, request) => {
     const urlObj = new URL(url, 'http://localhost');
     const pathname = urlObj.pathname;
 
+    // Check for slave routing parameter (for master mode)
+    const targetSlave = urlObj.searchParams.get('_slave');
+
+    // Handle cluster tunnel connections (master mode)
+    if (pathname === '/cluster/tunnel') {
+        if (DEPLOYMENT_MODE === 'master' && tunnelManager) {
+            tunnelManager.handleConnection(ws, request);
+        } else {
+            console.log('[WARN] Cluster tunnel connection rejected - not in master mode');
+            ws.close(4000, 'Not in master mode');
+        }
+        return;
+    }
+
+    // Route to slave if specified and in master mode
+    if (targetSlave && targetSlave !== 'local' && DEPLOYMENT_MODE === 'master' && tunnelManager) {
+        const channel = pathname === '/shell' ? 'shell' : 'ws';
+        try {
+            tunnelManager.createWsTunnel(targetSlave, ws, channel);
+            console.log(`[INFO] WebSocket tunneled to slave: ${targetSlave} (${channel})`);
+        } catch (error) {
+            console.error(`[ERROR] Failed to create WebSocket tunnel to ${targetSlave}:`, error.message);
+            ws.close(4003, `Failed to connect to slave: ${error.message}`);
+        }
+        return;
+    }
+
+    // Local handling
     if (pathname === '/shell') {
         handleShellConnection(ws);
     } else if (pathname === '/ws') {
@@ -971,6 +1021,7 @@ function handleShellConnection(ws) {
                 const provider = data.provider || 'claude';
                 const initialCommand = data.initialCommand;
                 const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
+                const skipPermissions = data.skipPermissions || false;
 
                 // Login commands (Claude/Cursor auth) should never reuse cached sessions
                 const isLoginCommand = initialCommand && (
@@ -1073,17 +1124,19 @@ function handleShellConnection(ws) {
                         }
                     } else {
                         // Use claude command (default) or initialCommand if provided
-                        const command = initialCommand || 'claude';
+                        // Add --dangerously-skip-permissions by default (requires IS_SANDBOX=1)
+                        const skipPermsFlag = '--dangerously-skip-permissions';
+                        const command = initialCommand || `claude ${skipPermsFlag}`;
                         if (os.platform() === 'win32') {
                             if (hasSession && sessionId) {
                                 // Try to resume session, but with fallback to new session if it fails
-                                shellCommand = `Set-Location -Path "${projectPath}"; claude --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { claude }`;
+                                shellCommand = `Set-Location -Path "${projectPath}"; claude ${skipPermsFlag} --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { claude ${skipPermsFlag} }`;
                             } else {
                                 shellCommand = `Set-Location -Path "${projectPath}"; ${command}`;
                             }
                         } else {
                             if (hasSession && sessionId) {
-                                shellCommand = `cd "${projectPath}" && claude --resume ${sessionId} || claude`;
+                                shellCommand = `cd "${projectPath}" && claude ${skipPermsFlag} --resume ${sessionId} || claude ${skipPermsFlag}`;
                             } else {
                                 shellCommand = `cd "${projectPath}" && ${command}`;
                             }
@@ -1788,6 +1841,34 @@ async function startServer() {
         // Initialize authentication database
         await initializeDatabase();
 
+        // Initialize cluster mode
+        if (DEPLOYMENT_MODE === 'master') {
+            tunnelManager = new TunnelManager({
+                secret: process.env.CLUSTER_SECRET
+            });
+            console.log(`${c.info('[CLUSTER]')} Running in MASTER mode`);
+            if (!process.env.CLUSTER_SECRET) {
+                console.log(`${c.warn('[CLUSTER]')} Warning: CLUSTER_SECRET not set - slaves cannot authenticate`);
+            }
+
+            // Add request router middleware for master mode
+            // This must be added after tunnelManager is initialized
+            app.use('/api', createRequestRouter(tunnelManager));
+        } else if (DEPLOYMENT_MODE === 'slave') {
+            tunnelClient = new TunnelClient({
+                masterUrl: process.env.MASTER_URL,
+                slaveId: process.env.SLAVE_ID,
+                slaveName: process.env.SLAVE_NAME,
+                secret: process.env.CLUSTER_SECRET,
+                localPort: PORT
+            });
+            console.log(`${c.info('[CLUSTER]')} Running in SLAVE mode`);
+            console.log(`${c.info('[CLUSTER]')} Slave ID: ${process.env.SLAVE_ID || 'NOT SET'}`);
+            console.log(`${c.info('[CLUSTER]')} Master URL: ${process.env.MASTER_URL || 'NOT SET'}`);
+        } else {
+            console.log(`${c.info('[CLUSTER]')} Running in STANDALONE mode (no clustering)`);
+        }
+
         // Check if running in production mode (dist folder exists)
         const distIndexPath = path.join(__dirname, '../dist/index.html');
         const isProduction = fs.existsSync(distIndexPath);
@@ -1810,11 +1891,17 @@ async function startServer() {
             console.log('');
             console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://0.0.0.0:' + PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
+            console.log(`${c.info('[INFO]')} Deployment Mode: ${c.bright(DEPLOYMENT_MODE)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');
 
             // Start watching the projects folder for changes
             await setupProjectsWatcher();
+
+            // Start tunnel client after server is ready (slave mode)
+            if (DEPLOYMENT_MODE === 'slave' && tunnelClient) {
+                tunnelClient.start();
+            }
         });
     } catch (error) {
         console.error('[ERROR] Failed to start server:', error);

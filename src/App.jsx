@@ -32,6 +32,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { TaskMasterProvider } from './contexts/TaskMasterContext';
 import { TasksSettingsProvider } from './contexts/TasksSettingsContext';
 import { WebSocketProvider, useWebSocketContext } from './contexts/WebSocketContext';
+import { ClusterProvider } from './contexts/ClusterContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useVersionCheck } from './hooks/useVersionCheck';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -987,18 +988,20 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <WebSocketProvider>
-            <TasksSettingsProvider>
-              <TaskMasterProvider>
-                <ProtectedRoute>
-                  <Router basename={window.__ROUTER_BASENAME__ || ''}>                                                                                                      
-                    <Routes>
-                      <Route path="/" element={<AppContent />} />
-                      <Route path="/session/:sessionId" element={<AppContent />} />
-                    </Routes>
-                  </Router>
-                </ProtectedRoute>
-              </TaskMasterProvider>
-            </TasksSettingsProvider>
+            <ClusterProvider>
+              <TasksSettingsProvider>
+                <TaskMasterProvider>
+                  <ProtectedRoute>
+                    <Router basename={window.__ROUTER_BASENAME__ || ''}>
+                      <Routes>
+                        <Route path="/" element={<AppContent />} />
+                        <Route path="/session/:sessionId" element={<AppContent />} />
+                      </Routes>
+                    </Router>
+                  </ProtectedRoute>
+                </TaskMasterProvider>
+              </TasksSettingsProvider>
+            </ClusterProvider>
           </WebSocketProvider>
         </AuthProvider>
       </ThemeProvider>

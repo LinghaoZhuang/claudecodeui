@@ -1,7 +1,36 @@
 // Utility function for authenticated API calls
+// Remote server for Capacitor environment
+const REMOTE_SERVER = 'https://code.zaneleo.top';
+
+// Storage key for selected cluster client
+const SELECTED_CLIENT_KEY = 'cluster-selected-client';
+
+// Check if running in Capacitor environment
+const isCapacitor = () => {
+  return typeof window !== 'undefined' && window.Capacitor !== undefined;
+};
+
+// Get base URL based on environment
+const getBaseUrl = () => {
+  if (isCapacitor()) {
+    return REMOTE_SERVER;
+  }
+  return ''; // Use relative URLs for web
+};
+
+// Get selected cluster client ID
+const getSelectedClientId = () => {
+  try {
+    return localStorage.getItem(SELECTED_CLIENT_KEY) || 'local';
+  } catch {
+    return 'local';
+  }
+};
+
 export const authenticatedFetch = (url, options = {}) => {
   const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
   const token = localStorage.getItem('auth-token');
+  const baseUrl = getBaseUrl();
 
   const defaultHeaders = {};
 
@@ -14,8 +43,21 @@ export const authenticatedFetch = (url, options = {}) => {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
-  return fetch(url, {
+  // Add X-Target-Slave header for cluster routing
+  // Skip for cluster status endpoints to avoid circular issues
+  if (!url.startsWith('/api/cluster/')) {
+    const selectedClient = getSelectedClientId();
+    if (selectedClient && selectedClient !== 'local') {
+      defaultHeaders['X-Target-Slave'] = selectedClient;
+    }
+  }
+
+  // Build full URL for Capacitor
+  const fullUrl = baseUrl ? `${baseUrl}${url}` : url;
+
+  return fetch(fullUrl, {
     ...options,
+    credentials: isCapacitor() ? 'include' : options.credentials,
     headers: {
       ...defaultHeaders,
       ...options.headers,
@@ -23,17 +65,27 @@ export const authenticatedFetch = (url, options = {}) => {
   });
 };
 
+// Helper for non-authenticated fetch with Capacitor support
+const fetchWithCapacitor = (url, options = {}) => {
+  const baseUrl = getBaseUrl();
+  const fullUrl = baseUrl ? `${baseUrl}${url}` : url;
+  return fetch(fullUrl, {
+    ...options,
+    credentials: isCapacitor() ? 'include' : options.credentials,
+  });
+};
+
 // API endpoints
 export const api = {
   // Auth endpoints (no token required)
   auth: {
-    status: () => fetch('/api/auth/status'),
-    login: (username, password) => fetch('/api/auth/login', {
+    status: () => fetchWithCapacitor('/api/auth/status'),
+    login: (username, password) => fetchWithCapacitor('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-    register: (username, password) => fetch('/api/auth/register', {
+    register: (username, password) => fetchWithCapacitor('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -45,7 +97,7 @@ export const api = {
   // Protected endpoints
   // config endpoint removed - no longer needed (frontend uses window.location)
   projects: () => authenticatedFetch('/api/projects'),
-  sessions: (projectName, limit = 5, offset = 0) => 
+  sessions: (projectName, limit = 5, offset = 0) =>
     authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}`),
   sessionMessages: (projectName, sessionId, limit = null, offset = 0, provider = 'claude') => {
     const params = new URLSearchParams();
@@ -112,18 +164,18 @@ export const api = {
   // TaskMaster endpoints
   taskmaster: {
     // Initialize TaskMaster in a project
-    init: (projectName) => 
+    init: (projectName) =>
       authenticatedFetch(`/api/taskmaster/init/${projectName}`, {
         method: 'POST',
       }),
-    
+
     // Add a new task
     addTask: (projectName, { prompt, title, description, priority, dependencies }) =>
       authenticatedFetch(`/api/taskmaster/add-task/${projectName}`, {
         method: 'POST',
         body: JSON.stringify({ prompt, title, description, priority, dependencies }),
       }),
-    
+
     // Parse PRD to generate tasks
     parsePRD: (projectName, { fileName, numTasks, append }) =>
       authenticatedFetch(`/api/taskmaster/parse-prd/${projectName}`, {
@@ -149,7 +201,7 @@ export const api = {
         body: JSON.stringify(updates),
       }),
   },
-  
+
   // Browse filesystem for project suggestions
   browseFilesystem: (dirPath = null) => {
     const params = new URLSearchParams();
@@ -182,3 +234,6 @@ export const api = {
   // Generic GET method for any endpoint
   get: (endpoint) => authenticatedFetch(`/api${endpoint}`),
 };
+
+// Export utilities for external use
+export { isCapacitor, getBaseUrl, REMOTE_SERVER };
