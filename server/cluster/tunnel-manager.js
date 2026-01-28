@@ -209,7 +209,6 @@ class TunnelManager {
     const tunnel = this.tunnels.get(tunnelId);
 
     if (!tunnel) {
-      console.warn(`[TunnelManager] No tunnel found for ${tunnelId}`);
       return;
     }
 
@@ -241,16 +240,12 @@ class TunnelManager {
     const tunnel = this.tunnels.get(tunnelId);
 
     if (!tunnel) {
-      console.warn(`[TunnelManager] No tunnel found for ready message: ${tunnelId}`);
       return;
     }
-
-    console.log(`[TunnelManager] Tunnel ready: ${tunnelId}`);
     tunnel.ready = true;
 
     // Flush any buffered messages
     if (tunnel.buffer && tunnel.buffer.length > 0) {
-      console.log(`[TunnelManager] Flushing ${tunnel.buffer.length} buffered messages for tunnel ${tunnelId}`);
       const slave = this.slaves.get(tunnel.slaveId);
       if (slave && slave.ws.readyState === WebSocket.OPEN) {
         for (const data of tunnel.buffer) {
@@ -330,15 +325,11 @@ class TunnelManager {
     }
 
     // Use originalUrl to get full path including /api prefix
-    // req.url is relative to middleware mount point, req.originalUrl is the full path
     const fullPath = request.originalUrl;
-
-    console.log(`[TunnelManager] Forwarding HTTP ${request.method} ${fullPath} to slave ${slaveId}`);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
-        console.error(`[TunnelManager] HTTP request timeout for ${requestId}`);
         reject(new Error('Request timeout'));
       }, this.requestTimeout);
 

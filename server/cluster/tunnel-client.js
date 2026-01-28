@@ -152,16 +152,8 @@ class TunnelClient {
   async handleHttpRequest(message) {
     const { requestId, method, path, headers, body } = message;
 
-    console.log(`[TunnelClient] HTTP Request: ${method} ${path}`);
-    console.log(`[TunnelClient] Headers:`, JSON.stringify(headers, null, 2));
-
     try {
       const response = await this.forwardToLocal(method, path, headers, body);
-
-      console.log(`[TunnelClient] HTTP Response: ${response.status} for ${method} ${path}`);
-      if (response.status >= 400) {
-        console.log(`[TunnelClient] Error response body:`, response.body.substring(0, 500));
-      }
 
       this.send({
         type: 'response',
@@ -171,8 +163,7 @@ class TunnelClient {
         body: response.body
       });
     } catch (error) {
-      console.error('[TunnelClient] Error forwarding request:', error.message);
-      console.error('[TunnelClient] Stack:', error.stack);
+      console.error(`[TunnelClient] Error forwarding ${method} ${path}:`, error.message);
 
       this.send({
         type: 'response',
@@ -258,7 +249,6 @@ class TunnelClient {
       const localWs = new WebSocket(localWsUrl);
 
       localWs.on('open', () => {
-        console.log(`[TunnelClient] Local WebSocket tunnel opened: ${tunnelId} (${channel})`);
         this.localTunnels.set(tunnelId, localWs);
 
         // Send ready confirmation to master - tunnel is now ready to receive messages
@@ -277,7 +267,7 @@ class TunnelClient {
       });
 
       localWs.on('close', () => {
-        console.log(`[TunnelClient] Local WebSocket tunnel closed: ${tunnelId}`);
+        this.localTunnels.delete(tunnelId);
         this.localTunnels.delete(tunnelId);
 
         this.send({
