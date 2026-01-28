@@ -44,8 +44,8 @@ export const authenticatedFetch = (url, options = {}) => {
   }
 
   // Add X-Target-Slave header for cluster routing
-  // Skip for cluster status endpoints to avoid circular issues
-  if (!url.startsWith('/api/cluster/')) {
+  // Skip for cluster and user management endpoints (these always run on master)
+  if (!url.startsWith('/api/cluster/') && !url.startsWith('/api/user/') && !url.startsWith('/api/auth/')) {
     const selectedClient = getSelectedClientId();
     if (selectedClient && selectedClient !== 'local') {
       defaultHeaders['X-Target-Slave'] = selectedClient;

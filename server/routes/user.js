@@ -74,9 +74,11 @@ router.post('/git-config', authenticateToken, async (req, res) => {
 });
 
 router.post('/complete-onboarding', authenticateToken, async (req, res) => {
+  console.log('[Onboarding] Complete onboarding request received for user:', req.user?.id, req.user?.username);
   try {
     const userId = req.user.id;
     userDb.completeOnboarding(userId);
+    console.log('[Onboarding] Onboarding completed for user:', userId);
 
     res.json({
       success: true,

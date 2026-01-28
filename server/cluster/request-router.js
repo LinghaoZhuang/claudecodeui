@@ -10,6 +10,11 @@ function createRequestRouter(tunnelManager) {
   return async (req, res, next) => {
     const targetSlave = req.headers['x-target-slave'];
 
+    // Log onboarding requests for debugging
+    if (req.originalUrl.includes('onboarding')) {
+      console.log('[RequestRouter] Onboarding request:', req.method, req.originalUrl, 'target:', targetSlave || 'local');
+    }
+
     // If no target or 'local', handle locally
     if (!targetSlave || targetSlave === 'local') {
       return next();
