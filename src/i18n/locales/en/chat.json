@@ -173,7 +173,8 @@
       "showingOf": "Showing {{shown}} of {{total}} messages",
       "scrollToLoad": "Scroll up to load more",
       "showingLast": "Showing last {{count}} messages ({{total}} total)",
-      "loadEarlier": "Load earlier messages"
+      "loadEarlier": "Load earlier messages",
+      "loadMore": "Load more"
     }
   },
   "shell": {

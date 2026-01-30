@@ -173,7 +173,8 @@
       "showingOf": "显示 {{shown}} / {{total}} 条消息",
       "scrollToLoad": "向上滚动以加载更多",
       "showingLast": "显示最近 {{count}} 条消息（共 {{total}} 条）",
-      "loadEarlier": "加载更早的消息"
+      "loadEarlier": "加载更早的消息",
+      "loadMore": "加载更多"
     }
   },
   "shell": {
