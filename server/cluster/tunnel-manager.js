@@ -73,10 +73,11 @@ class TunnelManager {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
       clearTimeout(authTimer);
       if (slaveId && this.slaves.has(slaveId)) {
-        console.log(`[TunnelManager] Slave disconnected: ${slaveId}`);
+        const reasonStr = reason ? reason.toString() : 'unknown';
+        console.log(`[TunnelManager] Slave disconnected: ${slaveId} (code: ${code}, reason: ${reasonStr})`);
         this.slaves.delete(slaveId);
 
         // Clean up any tunnels for this slave
