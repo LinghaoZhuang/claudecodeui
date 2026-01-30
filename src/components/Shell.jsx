@@ -467,7 +467,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
             <button
               onClick={restartShell}
-              disabled={isRestarting || isConnected}
+              disabled={isRestarting}
               className="text-xs text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
               title={t('shell.actions.restartTitle')}
             >

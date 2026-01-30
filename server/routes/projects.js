@@ -48,7 +48,7 @@ export const FORBIDDEN_PATHS = [
  * @param {string} requestedPath - The path to validate
  * @returns {Promise<{valid: boolean, resolvedPath?: string, error?: string}>}
  */
-async function validateWorkspacePath(requestedPath) {
+async function validateWorkspacePath(requestedPath, { skipRootCheck = false } = {}) {
   try {
     // Resolve to absolute path
     let absolutePath = path.resolve(requestedPath);
@@ -110,42 +110,46 @@ async function validateWorkspacePath(requestedPath) {
       }
     }
 
-    // Resolve the workspace root to its real path
-    const resolvedWorkspaceRoot = await fs.realpath(WORKSPACES_ROOT);
+    // For new workspaces, ensure path is within allowed workspace root
+    // For existing workspaces (skipRootCheck), any non-forbidden path is allowed
+    if (!skipRootCheck) {
+      // Resolve the workspace root to its real path
+      const resolvedWorkspaceRoot = await fs.realpath(WORKSPACES_ROOT);
 
-    // Ensure the resolved path is contained within the allowed workspace root
-    if (!realPath.startsWith(resolvedWorkspaceRoot + path.sep) &&
-        realPath !== resolvedWorkspaceRoot) {
-      return {
-        valid: false,
-        error: `Workspace path must be within the allowed workspace root: ${WORKSPACES_ROOT}`
-      };
-    }
+      // Ensure the resolved path is contained within the allowed workspace root
+      if (!realPath.startsWith(resolvedWorkspaceRoot + path.sep) &&
+          realPath !== resolvedWorkspaceRoot) {
+        return {
+          valid: false,
+          error: `Workspace path must be within the allowed workspace root: ${WORKSPACES_ROOT}`
+        };
+      }
 
-    // Additional symlink check for existing paths
-    try {
-      await fs.access(absolutePath);
-      const stats = await fs.lstat(absolutePath);
+      // Additional symlink check for existing paths
+      try {
+        await fs.access(absolutePath);
+        const stats = await fs.lstat(absolutePath);
 
-      if (stats.isSymbolicLink()) {
-        // Verify symlink target is also within allowed root
-        const linkTarget = await fs.readlink(absolutePath);
-        const resolvedTarget = path.resolve(path.dirname(absolutePath), linkTarget);
-        const realTarget = await fs.realpath(resolvedTarget);
+        if (stats.isSymbolicLink()) {
+          // Verify symlink target is also within allowed root
+          const linkTarget = await fs.readlink(absolutePath);
+          const resolvedTarget = path.resolve(path.dirname(absolutePath), linkTarget);
+          const realTarget = await fs.realpath(resolvedTarget);
 
-        if (!realTarget.startsWith(resolvedWorkspaceRoot + path.sep) &&
-            realTarget !== resolvedWorkspaceRoot) {
-          return {
-            valid: false,
-            error: 'Symlink target is outside the allowed workspace root'
-          };
+          if (!realTarget.startsWith(resolvedWorkspaceRoot + path.sep) &&
+              realTarget !== resolvedWorkspaceRoot) {
+            return {
+              valid: false,
+              error: 'Symlink target is outside the allowed workspace root'
+            };
+          }
         }
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          throw error;
+        }
+        // Path doesn't exist - that's fine for new workspace creation
       }
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        throw error;
-      }
-      // Path doesn't exist - that's fine for new workspace creation
     }
 
     return {
@@ -186,7 +190,8 @@ router.post('/create-workspace', async (req, res) => {
     }
 
     // Validate path safety before any operations
-    const validation = await validateWorkspacePath(workspacePath);
+    // For existing workspaces, skip WORKSPACES_ROOT check - allow any non-forbidden path
+    const validation = await validateWorkspacePath(workspacePath, { skipRootCheck: true });
     if (!validation.valid) {
       return res.status(400).json({
         error: 'Invalid workspace path',
@@ -353,7 +358,7 @@ router.get('/clone-progress', async (req, res) => {
       return;
     }
 
-    const validation = await validateWorkspacePath(workspacePath);
+    const validation = await validateWorkspacePath(workspacePath, { skipRootCheck: true });
     if (!validation.valid) {
       sendEvent('error', { message: validation.error });
       res.end();

@@ -54,10 +54,10 @@ function AppContent() {
   const { selectedClientId } = useCluster();
 
   // Optimistic loading: Load cached projects immediately (per-slave cache)
-  const initialClientId = getSelectedClientId();
+  const initialClientIdRef = useRef(getSelectedClientId());
   const cachedProjects = (() => {
     try {
-      const cacheKey = `cached-projects-${initialClientId}`;
+      const cacheKey = `cached-projects-${initialClientIdRef.current}`;
       const cached = localStorage.getItem(cacheKey);
       return cached ? JSON.parse(cached) : [];
     } catch {
@@ -154,7 +154,8 @@ function AppContent() {
   // Handle slave switch: load cached data for new slave and refresh
   useEffect(() => {
     // Skip on initial mount (handled by the effect above)
-    if (selectedClientId === initialClientId) return;
+    if (selectedClientId === initialClientIdRef.current) return;
+    initialClientIdRef.current = selectedClientId;
 
     // Load cached projects for the new slave
     const cacheKey = `cached-projects-${selectedClientId}`;
