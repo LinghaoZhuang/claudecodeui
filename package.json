@@ -28,6 +28,7 @@
     "client": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "npm run build && npm run server",
     "release": "./release.sh",
     "cap:sync": "npx cap sync android",
@@ -105,6 +106,7 @@
     "ws": "^8.14.2"
   },
   "devDependencies": {
+    "@types/node": "^22.19.7",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.6.0",
