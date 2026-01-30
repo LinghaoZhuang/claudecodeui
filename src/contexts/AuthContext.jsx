@@ -23,9 +23,21 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('auth-token'));
-  const [isLoading, setIsLoading] = useState(true);
+  // Optimistic loading: If we have a token, assume logged in and show cached user immediately
+  const storedToken = localStorage.getItem('auth-token');
+  const cachedUser = storedToken ? (() => {
+    try {
+      const cached = localStorage.getItem('cached-user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  })() : null;
+
+  const [user, setUser] = useState(cachedUser);
+  const [token, setToken] = useState(storedToken);
+  // If we have a token and cached user, skip loading state entirely
+  const [isLoading, setIsLoading] = useState(!storedToken || !cachedUser);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(true);
   const [error, setError] = useState(null);
@@ -61,7 +73,10 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      setIsLoading(true);
+      // Only set loading if we don't have cached user (optimistic loading)
+      if (!user) {
+        setIsLoading(true);
+      }
       setError(null);
 
       // Check if system needs setup
@@ -70,11 +85,13 @@ export const AuthProvider = ({ children }) => {
 
       if (statusData.needsSetup) {
         setNeedsSetup(true);
+        setUser(null);
+        localStorage.removeItem('cached-user');
         setIsLoading(false);
         return;
       }
 
-      // If we have a token, verify it
+      // If we have a token, verify it in the background
       if (token) {
         try {
           const userResponse = await api.auth.user();
@@ -82,17 +99,21 @@ export const AuthProvider = ({ children }) => {
           if (userResponse.ok) {
             const userData = await userResponse.json();
             setUser(userData.user);
+            // Cache user info for optimistic loading next time
+            localStorage.setItem('cached-user', JSON.stringify(userData.user));
             setNeedsSetup(false);
             await checkOnboardingStatus();
           } else {
-            // Token is invalid
+            // Token is invalid - clear everything
             localStorage.removeItem('auth-token');
+            localStorage.removeItem('cached-user');
             setToken(null);
             setUser(null);
           }
         } catch (error) {
           console.error('Token verification failed:', error);
           localStorage.removeItem('auth-token');
+          localStorage.removeItem('cached-user');
           setToken(null);
           setUser(null);
         }
@@ -116,6 +137,8 @@ export const AuthProvider = ({ children }) => {
         setToken(data.token);
         setUser(data.user);
         localStorage.setItem('auth-token', data.token);
+        // Cache user info for optimistic loading
+        localStorage.setItem('cached-user', JSON.stringify(data.user));
         return { success: true };
       } else {
         setError(data.error || 'Login failed');
@@ -141,6 +164,8 @@ export const AuthProvider = ({ children }) => {
         setUser(data.user);
         setNeedsSetup(false);
         localStorage.setItem('auth-token', data.token);
+        // Cache user info for optimistic loading
+        localStorage.setItem('cached-user', JSON.stringify(data.user));
         return { success: true };
       } else {
         setError(data.error || 'Registration failed');
@@ -158,7 +183,8 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     setUser(null);
     localStorage.removeItem('auth-token');
-    
+    localStorage.removeItem('cached-user');
+
     // Optional: Call logout endpoint for logging
     if (token) {
       api.auth.logout().catch(error => {

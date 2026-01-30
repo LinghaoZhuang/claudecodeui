@@ -50,13 +50,24 @@ function AppContent() {
   const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
   const [showVersionModal, setShowVersionModal] = useState(false);
   
-  const [projects, setProjects] = useState([]);
+  // Optimistic loading: Load cached projects immediately
+  const cachedProjects = (() => {
+    try {
+      const cached = localStorage.getItem('cached-projects');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  const [projects, setProjects] = useState(cachedProjects);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'files'
   const [isMobile, setIsMobile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  // If we have cached projects, don't show loading state
+  const [isLoadingProjects, setIsLoadingProjects] = useState(cachedProjects.length === 0);
   const [loadingProgress, setLoadingProgress] = useState(null); // { phase, current, total, currentProject }
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -282,58 +293,49 @@ function AppContent() {
 
   const fetchProjects = async () => {
     try {
-      setIsLoadingProjects(true);
+      // Only show loading if we don't have cached projects
+      if (projects.length === 0) {
+        setIsLoadingProjects(true);
+      }
       const response = await api.projects();
       const data = await response.json();
-      
-      // Always fetch Cursor sessions for each project so we can combine views
-      for (let project of data) {
-        try {
-          const url = `/api/cursor/sessions?projectPath=${encodeURIComponent(project.fullPath || project.path)}`;
-          const cursorResponse = await authenticatedFetch(url);
-          if (cursorResponse.ok) {
-            const cursorData = await cursorResponse.json();
-            if (cursorData.success && cursorData.sessions) {
-              project.cursorSessions = cursorData.sessions;
-            } else {
-              project.cursorSessions = [];
-            }
-          } else {
-            project.cursorSessions = [];
-          }
-        } catch (error) {
-          console.error(`Error fetching Cursor sessions for project ${project.name}:`, error);
-          project.cursorSessions = [];
-        }
-      }
-      
+
+      // Cursor sessions are loaded lazily when needed, not on initial load
+      // This eliminates the serial loading bottleneck
+
       // Optimize to preserve object references when data hasn't changed
       setProjects(prevProjects => {
         // If no previous projects, just set the new data
         if (prevProjects.length === 0) {
+          // Cache projects for optimistic loading next time
+          localStorage.setItem('cached-projects', JSON.stringify(data));
           return data;
         }
-        
+
         // Check if the projects data has actually changed
         const hasChanges = data.some((newProject, index) => {
           const prevProject = prevProjects[index];
           if (!prevProject) return true;
-          
+
           // Compare key properties that would affect UI
           return (
             newProject.name !== prevProject.name ||
             newProject.displayName !== prevProject.displayName ||
             newProject.fullPath !== prevProject.fullPath ||
             JSON.stringify(newProject.sessionMeta) !== JSON.stringify(prevProject.sessionMeta) ||
-            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions) ||
-            JSON.stringify(newProject.cursorSessions) !== JSON.stringify(prevProject.cursorSessions)
+            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions)
           );
         }) || data.length !== prevProjects.length;
-        
+
         // Only update if there are actual changes
-        return hasChanges ? data : prevProjects;
+        if (hasChanges) {
+          // Cache projects for optimistic loading next time
+          localStorage.setItem('cached-projects', JSON.stringify(data));
+          return data;
+        }
+        return prevProjects;
       });
-      
+
       // Don't auto-select any project - user should choose manually
     } catch (error) {
       console.error('Error fetching projects:', error);
