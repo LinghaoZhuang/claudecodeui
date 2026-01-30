@@ -2992,7 +2992,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       const container = scrollContainerRef.current;
       const nearBottom = isNearBottom();
       setIsUserScrolledUp(!nearBottom);
-      
+
       // Check if we should load more messages (scrolled near top)
       const scrolledNearTop = container.scrollTop < 100;
       if (!scrolledNearTop) {
@@ -3001,10 +3001,31 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         const didLoad = await loadOlderMessages(container);
         if (didLoad) {
           topLoadLockRef.current = true;
+          // Auto-unlock after a short delay to allow subsequent loads
+          setTimeout(() => {
+            topLoadLockRef.current = false;
+          }, 500);
         }
       }
     }
   }, [isNearBottom, loadOlderMessages]);
+
+  // Auto-load more messages if container is not scrollable but has more messages
+  useEffect(() => {
+    if (!hasMoreMessages || isLoadingMoreMessages || !scrollContainerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    const isScrollable = container.scrollHeight > container.clientHeight;
+
+    // If container is not scrollable and we have more messages, load them automatically
+    if (!isScrollable && hasMoreMessages) {
+      // Small delay to avoid rapid consecutive loads
+      const timer = setTimeout(() => {
+        loadOlderMessages(container);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [hasMoreMessages, isLoadingMoreMessages, chatMessages.length, loadOlderMessages]);
 
   // Restore scroll position after paginated messages render
   useLayoutEffect(() => {
@@ -5184,7 +5205,12 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
                 {totalMessages > 0 && (
                   <span>
                     {t('session.messages.showingOf', { shown: sessionMessages.length, total: totalMessages })} •
-                    <span className="text-xs">{t('session.messages.scrollToLoad')}</span>
+                    <button
+                      className="ml-1 text-blue-600 hover:text-blue-700 underline"
+                      onClick={() => loadOlderMessages(scrollContainerRef.current)}
+                    >
+                      {t('session.messages.loadMore')}
+                    </button>
                   </span>
                 )}
               </div>
