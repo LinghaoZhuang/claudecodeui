@@ -3018,6 +3018,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   }, [chatMessages.length]);
 
   useEffect(() => {
+    // Race condition prevention: Track if this effect has been superseded
+    // When session changes rapidly, old requests should be ignored
+    let cancelled = false;
+
     // Load session messages when session changes
     const loadMessages = async () => {
       if (selectedSession && selectedProject) {
@@ -3073,18 +3077,20 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             });
           }
         }
-        
+
         if (provider === 'cursor') {
           // For Cursor, set the session ID for resuming
           setCurrentSessionId(selectedSession.id);
           sessionStorage.setItem('cursorSessionId', selectedSession.id);
-          
+
           // Only load messages from SQLite if this is NOT a system-initiated session change
           // For system-initiated changes, preserve existing messages
           if (!isSystemSessionChange) {
             // Load historical messages for Cursor session from SQLite
             const projectPath = selectedProject.fullPath || selectedProject.path;
             const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
+            // Race condition check: ignore stale response if session changed during fetch
+            if (cancelled) return;
             setSessionMessages([]);
             setChatMessages(converted);
           } else {
@@ -3094,11 +3100,13 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         } else {
           // For Claude, load messages normally with pagination
           setCurrentSessionId(selectedSession.id);
-          
+
           // Only load messages from API if this is a user-initiated session change
           // For system-initiated changes, preserve existing messages and rely on WebSocket
           if (!isSystemSessionChange) {
             const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
+            // Race condition check: ignore stale response if session changed during fetch
+            if (cancelled) return;
             setSessionMessages(messages);
             // convertedMessages will be automatically updated via useMemo
             // Scroll will be handled by the main scroll useEffect after messages are rendered
@@ -3134,6 +3142,11 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     };
 
     loadMessages();
+
+    // Cleanup: mark as cancelled so stale async responses are ignored
+    return () => {
+      cancelled = true;
+    };
   }, [selectedSession, selectedProject, loadCursorSessionMessages, scrollToBottom, isSystemSessionChange, resetStreamingState]);
 
   // External Message Update Handler: Reload messages when external CLI modifies current session
