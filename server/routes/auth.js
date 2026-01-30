@@ -81,6 +81,11 @@ router.post('/register', async (req, res) => {
 // User login
 router.post('/login', async (req, res) => {
   try {
+    // Slave mode: reject direct login, only allow access via master
+    if (process.env.DEPLOYMENT_MODE === 'slave') {
+      return res.status(403).json({ error: 'Direct login is disabled on this server.' });
+    }
+
     const { username, password } = req.body;
     
     // Validate input
