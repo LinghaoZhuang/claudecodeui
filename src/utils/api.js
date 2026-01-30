@@ -27,7 +27,7 @@ const getSelectedClientId = () => {
   }
 };
 
-export const authenticatedFetch = (url, options = {}) => {
+export const authenticatedFetch = async (url, options = {}) => {
   const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
   const token = localStorage.getItem('auth-token');
   const baseUrl = getBaseUrl();
@@ -45,17 +45,17 @@ export const authenticatedFetch = (url, options = {}) => {
 
   // Add X-Target-Slave header for cluster routing
   // Skip for cluster and user management endpoints (these always run on master)
-  if (!url.startsWith('/api/cluster/') && !url.startsWith('/api/user/') && !url.startsWith('/api/auth/')) {
-    const selectedClient = getSelectedClientId();
-    if (selectedClient && selectedClient !== 'local') {
-      defaultHeaders['X-Target-Slave'] = selectedClient;
-    }
+  const selectedClient = getSelectedClientId();
+  const isSlaveRequest = !url.startsWith('/api/cluster/') && !url.startsWith('/api/user/') && !url.startsWith('/api/auth/');
+
+  if (isSlaveRequest && selectedClient && selectedClient !== 'local') {
+    defaultHeaders['X-Target-Slave'] = selectedClient;
   }
 
   // Build full URL for Capacitor
   const fullUrl = baseUrl ? `${baseUrl}${url}` : url;
 
-  return fetch(fullUrl, {
+  const response = await fetch(fullUrl, {
     ...options,
     credentials: isCapacitor() ? 'include' : options.credentials,
     headers: {
@@ -63,6 +63,35 @@ export const authenticatedFetch = (url, options = {}) => {
       ...options.headers,
     },
   });
+
+  // Auto-fallback to localhost when slave returns 503 (unavailable)
+  if (response.status === 503 && isSlaveRequest && selectedClient && selectedClient !== 'local') {
+    console.warn(`[API] Slave ${selectedClient} unavailable (503), falling back to localhost`);
+
+    // Clear slave selection
+    localStorage.setItem(SELECTED_CLIENT_KEY, 'local');
+
+    // Retry without slave header
+    const retryHeaders = { ...defaultHeaders, ...options.headers };
+    delete retryHeaders['X-Target-Slave'];
+
+    const retryResponse = await fetch(fullUrl, {
+      ...options,
+      credentials: isCapacitor() ? 'include' : options.credentials,
+      headers: retryHeaders,
+    });
+
+    // Notify user about the fallback
+    if (retryResponse.ok) {
+      window.dispatchEvent(new CustomEvent('cluster-fallback', {
+        detail: { fromSlave: selectedClient, reason: 'unavailable' }
+      }));
+    }
+
+    return retryResponse;
+  }
+
+  return response;
 };
 
 // Helper for non-authenticated fetch with Capacitor support
