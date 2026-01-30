@@ -3,6 +3,16 @@
 ## 概述
 本项目已配置为使用 Capacitor 将 Claude Code UI 打包为 Android APK，连接远程服务器 `https://code.zaneleo.top`。
 
+**当前版本**: 1.15.0
+
+## 新功能: 多客户端集群支持
+
+Android 应用现在支持连接到多个远程客户端（Slave），用户可以在应用内切换不同的客户端：
+
+- 在侧边栏顶部有客户端选择器
+- 选择不同客户端后，所有操作（项目浏览、聊天、终端）都会路由到对应的客户端
+- 客户端选择会保存到 localStorage，下次打开自动恢复
+
 ## 环境要求
 - Node.js 20+
 - Android Studio（含 Android SDK）
@@ -22,10 +32,13 @@ claudecodeui/
 │   │           └── network_security_config.xml  # 网络安全配置
 │   └── keystore.properties.template   # 签名配置模板
 ├── src/utils/
-│   ├── api.js                 # API 配置（支持 Capacitor）
-│   └── websocket.js           # WebSocket 配置（支持 Capacitor）
+│   ├── api.js                 # API 配置（支持 Capacitor + 集群）
+│   └── websocket.js           # WebSocket 配置（支持 Capacitor + 集群）
 ├── src/components/
-│   └── Shell.jsx              # Shell WebSocket（支持 Capacitor）
+│   ├── Shell.jsx              # Shell WebSocket（支持 Capacitor + 集群）
+│   └── ClientSelector.jsx     # 客户端选择器组件
+├── src/contexts/
+│   └── ClusterContext.jsx     # 集群状态管理
 └── public/
     └── sw.js                  # Service Worker（增强缓存策略）
 ```
@@ -111,6 +124,12 @@ npx cap open android
 - **Web 环境**: 使用相对 URL 连接本地服务器
 - **Capacitor 环境**: 使用完整 URL 连接 `https://code.zaneleo.top`
 
+### 集群客户端选择
+在 Capacitor 环境中，应用支持多客户端切换：
+- API 请求自动添加 `X-Target-Slave` header
+- WebSocket 连接自动添加 `_slave` 查询参数
+- 客户端选择保存在 `localStorage` 的 `cluster-selected-client` 键
+
 ### Service Worker 缓存策略
 - **静态资源**: 缓存优先，后台更新
 - **API 请求**: 网络优先，离线返回错误
@@ -179,10 +198,18 @@ wss.on('connection', (ws, req) => {
 更新应用版本：
 1. 编辑 `android/app/build.gradle`：
    ```gradle
-   versionCode 2
-   versionName "1.1"
+   versionCode 3
+   versionName "1.16.0"
    ```
-2. 重新构建 APK
+2. 同时更新 `package.json` 的 version 字段
+3. 重新构建 APK
+
+## 版本历史
+
+| 版本 | versionCode | 更新内容 |
+|------|-------------|----------|
+| 1.15.0 | 2 | 添加多客户端集群支持 |
+| 1.0 | 1 | 初始版本 |
 
 ## 更新图标
 

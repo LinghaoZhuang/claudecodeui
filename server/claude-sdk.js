@@ -495,7 +495,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // via WebSocket and waits for the response, introduced so tool calls pause
     // instead of auto-running when the allowlist is empty.
     sdkOptions.canUseTool = async (toolName, input, context) => {
-      if (sdkOptions.permissionMode === 'bypassPermissions') {
+      // AskUserQuestion always requires interactive user input, even in bypass mode
+      const requiresUserInput = toolName === 'AskUserQuestion';
+
+      if (sdkOptions.permissionMode === 'bypassPermissions' && !requiresUserInput) {
         return { behavior: 'allow', updatedInput: input };
       }
 
@@ -506,7 +509,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
         return { behavior: 'deny', message: 'Tool disallowed by settings' };
       }
 
-      const isAllowed = (sdkOptions.allowedTools || []).some(entry =>
+      const isAllowed = !requiresUserInput && (sdkOptions.allowedTools || []).some(entry =>
         matchesToolPermission(entry, toolName, input)
       );
       if (isAllowed) {
@@ -601,6 +604,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       // Transform and send message to WebSocket
       const transformedMessage = transformMessage(message);
+
+      // Debug: log all message types
+      console.log('SDK message type:', message.type, message.event?.type || '');
+
       ws.send({
         type: 'claude-response',
         data: transformedMessage,

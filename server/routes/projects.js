@@ -358,8 +358,7 @@ router.get('/clone-progress', async (req, res) => {
       return;
     }
 
-    const validation = await validateWorkspacePath(workspacePath, { skipRootCheck: true });
-    if (!validation.valid) {
+    const validation = await validateWorkspacePath(workspacePath, { skipRootCheck: true });    if (!validation.valid) {
       sendEvent('error', { message: validation.error });
       res.end();
       return;
