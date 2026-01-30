@@ -32,7 +32,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { TaskMasterProvider } from './contexts/TaskMasterContext';
 import { TasksSettingsProvider } from './contexts/TasksSettingsContext';
 import { WebSocketProvider, useWebSocketContext } from './contexts/WebSocketContext';
-import { ClusterProvider } from './contexts/ClusterContext';
+import { ClusterProvider, useCluster, getSelectedClientId } from './contexts/ClusterContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useVersionCheck } from './hooks/useVersionCheck';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -46,14 +46,19 @@ function AppContent() {
   const navigate = useNavigate();
   const { sessionId } = useParams();
   const { t } = useTranslation('common');
-  
+
   const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
   const [showVersionModal, setShowVersionModal] = useState(false);
-  
-  // Optimistic loading: Load cached projects immediately
+
+  // Get selected slave from cluster context
+  const { selectedClientId } = useCluster();
+
+  // Optimistic loading: Load cached projects immediately (per-slave cache)
+  const initialClientId = getSelectedClientId();
   const cachedProjects = (() => {
     try {
-      const cached = localStorage.getItem('cached-projects');
+      const cacheKey = `cached-projects-${initialClientId}`;
+      const cached = localStorage.getItem(cacheKey);
       return cached ? JSON.parse(cached) : [];
     } catch {
       return [];
@@ -145,6 +150,37 @@ function AppContent() {
     // Fetch projects on component mount
     fetchProjects();
   }, []);
+
+  // Handle slave switch: load cached data for new slave and refresh
+  useEffect(() => {
+    // Skip on initial mount (handled by the effect above)
+    if (selectedClientId === initialClientId) return;
+
+    // Load cached projects for the new slave
+    const cacheKey = `cached-projects-${selectedClientId}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        setProjects(JSON.parse(cached));
+        setIsLoadingProjects(false);
+      } else {
+        // No cache for this slave, clear projects and show loading
+        setProjects([]);
+        setIsLoadingProjects(true);
+      }
+    } catch {
+      setProjects([]);
+      setIsLoadingProjects(true);
+    }
+
+    // Clear selection when switching slaves
+    setSelectedProject(null);
+    setSelectedSession(null);
+    navigate('/');
+
+    // Fetch fresh data for the new slave
+    fetchProjects();
+  }, [selectedClientId]);
 
   // Helper function to determine if an update is purely additive (new sessions/projects)
   // vs modifying existing selected items that would interfere with active conversations
@@ -303,12 +339,16 @@ function AppContent() {
       // Cursor sessions are loaded lazily when needed, not on initial load
       // This eliminates the serial loading bottleneck
 
+      // Get current slave ID for per-slave caching
+      const currentClientId = getSelectedClientId();
+      const cacheKey = `cached-projects-${currentClientId}`;
+
       // Optimize to preserve object references when data hasn't changed
       setProjects(prevProjects => {
         // If no previous projects, just set the new data
         if (prevProjects.length === 0) {
-          // Cache projects for optimistic loading next time
-          localStorage.setItem('cached-projects', JSON.stringify(data));
+          // Cache projects for optimistic loading next time (per-slave)
+          localStorage.setItem(cacheKey, JSON.stringify(data));
           return data;
         }
 
@@ -329,8 +369,8 @@ function AppContent() {
 
         // Only update if there are actual changes
         if (hasChanges) {
-          // Cache projects for optimistic loading next time
-          localStorage.setItem('cached-projects', JSON.stringify(data));
+          // Cache projects for optimistic loading next time (per-slave)
+          localStorage.setItem(cacheKey, JSON.stringify(data));
           return data;
         }
         return prevProjects;
