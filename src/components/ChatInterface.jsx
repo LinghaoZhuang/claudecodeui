@@ -2408,11 +2408,13 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       }
     } catch (error) {
       console.error('Error loading session messages:', error);
-      return [];
-    } finally {
+      // Only reset loading state on error - success case will be handled after chatMessages updates
       if (isInitialLoad) {
         setIsLoadingSessionMessages(false);
-      } else {
+      }
+      return [];
+    } finally {
+      if (!isInitialLoad) {
         setIsLoadingMoreMessages(false);
       }
     }
@@ -2723,10 +2725,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       return converted;
     } catch (e) {
       console.error('Error loading Cursor session messages:', e);
-      return [];
-    } finally {
       setIsLoadingSessionMessages(false);
+      return [];
     }
+    // Note: Don't reset loading state here - it will be reset after setChatMessages in the caller
   }, []);
 
   // Actual diff calculation function
@@ -2990,7 +2992,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       const container = scrollContainerRef.current;
       const nearBottom = isNearBottom();
       setIsUserScrolledUp(!nearBottom);
-
+      
       // Check if we should load more messages (scrolled near top)
       const scrolledNearTop = container.scrollTop < 100;
       if (!scrolledNearTop) {
@@ -2999,31 +3001,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         const didLoad = await loadOlderMessages(container);
         if (didLoad) {
           topLoadLockRef.current = true;
-          // Auto-unlock after a short delay to allow subsequent loads
-          setTimeout(() => {
-            topLoadLockRef.current = false;
-          }, 500);
         }
       }
     }
   }, [isNearBottom, loadOlderMessages]);
-
-  // Auto-load more messages if container is not scrollable but has more messages
-  useEffect(() => {
-    if (!hasMoreMessages || isLoadingMoreMessages || !scrollContainerRef.current) return;
-
-    const container = scrollContainerRef.current;
-    const isScrollable = container.scrollHeight > container.clientHeight;
-
-    // If container is not scrollable and we have more messages, load them automatically
-    if (!isScrollable && hasMoreMessages) {
-      // Small delay to avoid rapid consecutive loads
-      const timer = setTimeout(() => {
-        loadOlderMessages(container);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [hasMoreMessages, isLoadingMoreMessages, chatMessages.length, loadOlderMessages]);
 
   // Restore scroll position after paginated messages render
   useLayoutEffect(() => {
@@ -3056,8 +3037,6 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
 
         if (sessionChanged) {
           if (!isSystemSessionChange) {
-            // Set loading state BEFORE clearing messages to prevent flash of empty state
-            setIsLoadingSessionMessages(true);
             // Clear any streaming leftovers from the previous session
             resetStreamingState();
             pendingViewSessionRef.current = null;
@@ -3116,6 +3095,8 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             if (cancelled) return;
             setSessionMessages([]);
             setChatMessages(converted);
+            // Reset loading state after chatMessages is set
+            setIsLoadingSessionMessages(false);
           } else {
             // Reset the flag after handling system session change
             setIsSystemSessionChange(false);
@@ -3220,6 +3201,8 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   useEffect(() => {
     if (sessionMessages.length > 0) {
       setChatMessages(convertedMessages);
+      // Reset loading state after chatMessages is updated
+      setIsLoadingSessionMessages(false);
     }
   }, [convertedMessages, sessionMessages]);
 
@@ -5194,19 +5177,14 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
                 </div>
               </div>
             )}
-
+            
             {/* Indicator showing there are more messages to load */}
             {hasMoreMessages && !isLoadingMoreMessages && (
               <div className="text-center text-gray-500 dark:text-gray-400 text-sm py-2 border-b border-gray-200 dark:border-gray-700">
                 {totalMessages > 0 && (
                   <span>
                     {t('session.messages.showingOf', { shown: sessionMessages.length, total: totalMessages })} •
-                    <button
-                      className="ml-1 text-blue-600 hover:text-blue-700 underline"
-                      onClick={() => loadOlderMessages(scrollContainerRef.current)}
-                    >
-                      {t('session.messages.loadMore')}
-                    </button>
+                    <span className="text-xs">{t('session.messages.scrollToLoad')}</span>
                   </span>
                 )}
               </div>
