@@ -93,6 +93,8 @@ function MainContent({
     }
   }, [selectedProject, currentProject, setCurrentProject]);
 
+  const MAX_SHELL_INSTANCES = 5;
+
   // Track opened projects for persistent terminal instances
   useEffect(() => {
     if (!selectedProject) return;
@@ -103,7 +105,12 @@ function MainContent({
       if (prev.some(p => (p.fullPath || p.path) === projectKey)) {
         return prev;
       }
-      return [...prev, selectedProject];
+      const next = [...prev, selectedProject];
+      // Evict oldest if over limit
+      if (next.length > MAX_SHELL_INSTANCES) {
+        return next.slice(next.length - MAX_SHELL_INSTANCES);
+      }
+      return next;
     });
   }, [selectedProject]);
 
@@ -117,7 +124,12 @@ function MainContent({
       if (prev.some(s => s.session.id === sessionKey)) {
         return prev;
       }
-      return [...prev, { session: selectedSession, project: selectedProject }];
+      const next = [...prev, { session: selectedSession, project: selectedProject }];
+      // Evict oldest if over limit
+      if (next.length > MAX_SHELL_INSTANCES) {
+        return next.slice(next.length - MAX_SHELL_INSTANCES);
+      }
+      return next;
     });
   }, [selectedSession, selectedProject]);
 
