@@ -1070,18 +1070,61 @@ function handleShellConnection(ws) {
 
                 const existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
                 if (existingSession) {
-                    console.log('♻️  Reconnecting to existing PTY session:', ptySessionKey);
+                    console.log('♻️  Joining existing PTY session:', ptySessionKey);
                     shellProcess = existingSession.pty;
 
-                    clearTimeout(existingSession.timeoutId);
+                    // Clear any pending timeout since a client is connecting
+                    if (existingSession.timeoutId) {
+                        clearTimeout(existingSession.timeoutId);
+                        existingSession.timeoutId = null;
+                    }
 
+                    // Force resize PTY to this client's dimensions if requested
+                    const forceResize = data.forceResize;
+                    const termCols = data.cols || 80;
+                    const termRows = data.rows || 24;
+
+                    if (forceResize && shellProcess && shellProcess.resize) {
+                        console.log('📐 Force resizing PTY to:', termCols, 'x', termRows);
+                        shellProcess.resize(termCols, termRows);
+
+                        // Notify all clients about the resize
+                        existingSession.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: 'output',
+                                    data: `\x1b[90m[Terminal resized to ${termCols}x${termRows}]\x1b[0m\r\n`
+                                }));
+                                // Send resize event so other clients can adjust their display
+                                client.send(JSON.stringify({
+                                    type: 'resize_sync',
+                                    cols: termCols,
+                                    rows: termRows
+                                }));
+                            }
+                        });
+                    }
+
+                    // Show connection message with client count
+                    const clientCount = existingSession.clients.size;
                     ws.send(JSON.stringify({
                         type: 'output',
-                        data: `\x1b[36m[Reconnected to existing session]\x1b[0m\r\n`
+                        data: `\x1b[36m[Joined shared session - ${clientCount + 1} client(s) connected]\x1b[0m\r\n`
                     }));
 
+                    // Notify existing clients about new participant
+                    existingSession.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify({
+                                type: 'output',
+                                data: `\x1b[90m[Another client joined - ${clientCount + 1} total]\x1b[0m\r\n`
+                            }));
+                        }
+                    });
+
+                    // Send buffered output to new client
                     if (existingSession.buffer && existingSession.buffer.length > 0) {
-                        console.log(`📜 Sending ${existingSession.buffer.length} buffered messages`);
+                        console.log(`📜 Sending ${existingSession.buffer.length} buffered messages to new client`);
                         existingSession.buffer.forEach(bufferedData => {
                             ws.send(JSON.stringify({
                                 type: 'output',
@@ -1090,7 +1133,8 @@ function handleShellConnection(ws) {
                         });
                     }
 
-                    existingSession.ws = ws;
+                    // Add new client to the set
+                    existingSession.clients.add(ws);
 
                     return;
                 }
@@ -1208,14 +1252,14 @@ function handleShellConnection(ws) {
 
                     ptySessionsMap.set(ptySessionKey, {
                         pty: shellProcess,
-                        ws: ws,
+                        clients: new Set([ws]),  // Support multiple clients sharing the same terminal
                         buffer: [],
                         timeoutId: null,
                         projectPath,
                         sessionId
                     });
 
-                    // Handle data output
+                    // Handle data output - broadcast to all connected clients
                     shellProcess.onData((data) => {
                         const session = ptySessionsMap.get(ptySessionKey);
                         if (!session) return;
@@ -1227,62 +1271,75 @@ function handleShellConnection(ws) {
                             session.buffer.push(data);
                         }
 
-                        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-                            let outputData = data;
+                        let outputData = data;
 
-                            // Check for various URL opening patterns
-                            const patterns = [
-                                // Direct browser opening commands
-                                /(?:xdg-open|open|start)\s+(https?:\/\/[^\s\x1b\x07]+)/g,
-                                // BROWSER environment variable override
-                                /OPEN_URL:\s*(https?:\/\/[^\s\x1b\x07]+)/g,
-                                // Git and other tools opening URLs
-                                /Opening\s+(https?:\/\/[^\s\x1b\x07]+)/gi,
-                                // General URL patterns that might be opened
-                                /Visit:\s*(https?:\/\/[^\s\x1b\x07]+)/gi,
-                                /View at:\s*(https?:\/\/[^\s\x1b\x07]+)/gi,
-                                /Browse to:\s*(https?:\/\/[^\s\x1b\x07]+)/gi
-                            ];
+                        // Check for various URL opening patterns
+                        const patterns = [
+                            // Direct browser opening commands
+                            /(?:xdg-open|open|start)\s+(https?:\/\/[^\s\x1b\x07]+)/g,
+                            // BROWSER environment variable override
+                            /OPEN_URL:\s*(https?:\/\/[^\s\x1b\x07]+)/g,
+                            // Git and other tools opening URLs
+                            /Opening\s+(https?:\/\/[^\s\x1b\x07]+)/gi,
+                            // General URL patterns that might be opened
+                            /Visit:\s*(https?:\/\/[^\s\x1b\x07]+)/gi,
+                            /View at:\s*(https?:\/\/[^\s\x1b\x07]+)/gi,
+                            /Browse to:\s*(https?:\/\/[^\s\x1b\x07]+)/gi
+                        ];
 
-                            patterns.forEach(pattern => {
-                                let match;
-                                while ((match = pattern.exec(data)) !== null) {
-                                    const url = match[1];
-                                    console.log('[DEBUG] Detected URL for opening:', url);
+                        const urlsFound = [];
+                        patterns.forEach(pattern => {
+                            let match;
+                            while ((match = pattern.exec(data)) !== null) {
+                                const url = match[1];
+                                console.log('[DEBUG] Detected URL for opening:', url);
+                                urlsFound.push(url);
 
-                                    // Send URL opening message to client
-                                    session.ws.send(JSON.stringify({
+                                // Replace the OPEN_URL pattern with a user-friendly message
+                                if (pattern.source.includes('OPEN_URL')) {
+                                    outputData = outputData.replace(match[0], `[INFO] Opening in browser: ${url}`);
+                                }
+                            }
+                        });
+
+                        // Broadcast to all connected clients
+                        session.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                // Send URL opening messages
+                                urlsFound.forEach(url => {
+                                    client.send(JSON.stringify({
                                         type: 'url_open',
                                         url: url
                                     }));
+                                });
 
-                                    // Replace the OPEN_URL pattern with a user-friendly message
-                                    if (pattern.source.includes('OPEN_URL')) {
-                                        outputData = outputData.replace(match[0], `[INFO] Opening in browser: ${url}`);
-                                    }
-                                }
-                            });
-
-                            // Send regular output
-                            session.ws.send(JSON.stringify({
-                                type: 'output',
-                                data: outputData
-                            }));
-                        }
+                                // Send regular output
+                                client.send(JSON.stringify({
+                                    type: 'output',
+                                    data: outputData
+                                }));
+                            }
+                        });
                     });
 
-                    // Handle process exit
+                    // Handle process exit - notify all clients
                     shellProcess.onExit((exitCode) => {
                         console.log('🔚 Shell process exited with code:', exitCode.exitCode, 'signal:', exitCode.signal);
                         const session = ptySessionsMap.get(ptySessionKey);
-                        if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
-                            session.ws.send(JSON.stringify({
+                        if (session) {
+                            const exitMessage = JSON.stringify({
                                 type: 'output',
                                 data: `\r\n\x1b[33mProcess exited with code ${exitCode.exitCode}${exitCode.signal ? ` (${exitCode.signal})` : ''}\x1b[0m\r\n`
-                            }));
-                        }
-                        if (session && session.timeoutId) {
-                            clearTimeout(session.timeoutId);
+                            });
+                            // Broadcast exit message to all clients
+                            session.clients.forEach(client => {
+                                if (client.readyState === WebSocket.OPEN) {
+                                    client.send(exitMessage);
+                                }
+                            });
+                            if (session.timeoutId) {
+                                clearTimeout(session.timeoutId);
+                            }
                         }
                         ptySessionsMap.delete(ptySessionKey);
                         shellProcess = null;
@@ -1313,6 +1370,38 @@ function handleShellConnection(ws) {
                     console.log('Terminal resize requested:', data.cols, 'x', data.rows);
                     shellProcess.resize(data.cols, data.rows);
                 }
+            } else if (data.type === 'kill') {
+                // Force kill the PTY process (real restart)
+                console.log('🔴 Kill request received for PTY session:', ptySessionKey);
+                if (ptySessionKey) {
+                    const session = ptySessionsMap.get(ptySessionKey);
+                    if (session) {
+                        // Notify all other clients that the session is being killed
+                        session.clients.forEach(client => {
+                            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: 'output',
+                                    data: `\r\n\x1b[33m[Session killed by another client]\x1b[0m\r\n`
+                                }));
+                            }
+                        });
+
+                        // Clear timeout if any
+                        if (session.timeoutId) {
+                            clearTimeout(session.timeoutId);
+                        }
+
+                        // Kill the PTY process
+                        if (session.pty && session.pty.kill) {
+                            session.pty.kill();
+                        }
+
+                        // Remove from map
+                        ptySessionsMap.delete(ptySessionKey);
+                        shellProcess = null;
+                        console.log('💀 PTY session killed:', ptySessionKey);
+                    }
+                }
             }
         } catch (error) {
             console.error('[ERROR] Shell WebSocket error:', error.message);
@@ -1331,16 +1420,36 @@ function handleShellConnection(ws) {
         if (ptySessionKey) {
             const session = ptySessionsMap.get(ptySessionKey);
             if (session) {
-                console.log('⏳ PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
-                session.ws = null;
+                // Remove this client from the set
+                session.clients.delete(ws);
+                const remainingClients = session.clients.size;
 
-                session.timeoutId = setTimeout(() => {
-                    console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
-                    if (session.pty && session.pty.kill) {
-                        session.pty.kill();
-                    }
-                    ptySessionsMap.delete(ptySessionKey);
-                }, PTY_SESSION_TIMEOUT);
+                console.log(`👥 Remaining clients for session ${ptySessionKey}: ${remainingClients}`);
+
+                // Notify remaining clients about the disconnection
+                if (remainingClients > 0) {
+                    session.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(JSON.stringify({
+                                type: 'output',
+                                data: `\x1b[90m[A client left - ${remainingClients} remaining]\x1b[0m\r\n`
+                            }));
+                        }
+                    });
+                }
+
+                // Only set timeout if no clients are connected
+                if (remainingClients === 0) {
+                    console.log('⏳ No clients left, PTY session will timeout in 30 minutes:', ptySessionKey);
+
+                    session.timeoutId = setTimeout(() => {
+                        console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
+                        if (session.pty && session.pty.kill) {
+                            session.pty.kill();
+                        }
+                        ptySessionsMap.delete(ptySessionKey);
+                    }, PTY_SESSION_TIMEOUT);
+                }
             }
         }
     });

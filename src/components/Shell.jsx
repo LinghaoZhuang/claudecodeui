@@ -55,6 +55,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const forceResizeRef = useRef(false);  // Force resize PTY on reconnect
 
   const selectedProjectRef = useRef(selectedProject);
   const selectedSessionRef = useRef(selectedSession);
@@ -130,8 +131,12 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
               cols: terminal.current.cols,
               rows: terminal.current.rows,
               initialCommand: initialCommandRef.current,
-              isPlainShell: isPlainShellRef.current
+              isPlainShell: isPlainShellRef.current,
+              forceResize: forceResizeRef.current  // Force PTY resize to this client's dimensions
             }));
+
+            // Reset forceResize flag after sending
+            forceResizeRef.current = false;
           }
         }, 100);
       };
@@ -207,6 +212,29 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
     setIsConnecting(false);
   }, []);
 
+  // Reconnect and sync resolution to this client's dimensions
+  const reconnectShell = useCallback(() => {
+    forceResizeRef.current = true;  // Force resize on reconnect
+
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
+    }
+
+    if (terminal.current) {
+      terminal.current.clear();
+      terminal.current.write('\x1b[2J\x1b[H');
+    }
+
+    setIsConnected(false);
+    setIsConnecting(false);
+
+    // Auto reconnect after a short delay
+    setTimeout(() => {
+      connectWebSocket();
+    }, 100);
+  }, [connectWebSocket]);
+
   const sessionDisplayName = useMemo(() => {
     if (!selectedSession) return null;
     return selectedSession.__provider === 'cursor'
@@ -226,6 +254,13 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
   const restartShell = () => {
     setIsRestarting(true);
+
+    // Send kill command to server to actually kill the PTY process
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'kill'
+      }));
+    }
 
     if (ws.current) {
       ws.current.close();
@@ -361,13 +396,24 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
     const resizeObserver = new ResizeObserver(() => {
       if (fitAddon.current && terminal.current) {
+        // Skip resize when terminal container is hidden (e.g., switched to chat tab)
+        // This prevents sending tiny dimensions to the shared PTY
+        const el = terminalRef.current;
+        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
+          return;
+        }
+
         setTimeout(() => {
           fitAddon.current.fit();
-          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          const cols = terminal.current.cols;
+          const rows = terminal.current.rows;
+
+          // Only send resize if dimensions are reasonable
+          if (cols > 1 && rows > 1 && ws.current && ws.current.readyState === WebSocket.OPEN) {
             ws.current.send(JSON.stringify({
               type: 'resize',
-              cols: terminal.current.cols,
-              rows: terminal.current.rows
+              cols,
+              rows
             }));
           }
         }, 50);
@@ -446,14 +492,14 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
           <div className="flex items-center space-x-3">
             {isConnected && (
               <button
-                onClick={disconnectFromShell}
-                className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 flex items-center space-x-1"
-                title={t('shell.actions.disconnectTitle')}
+                onClick={reconnectShell}
+                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center space-x-1"
+                title={t('shell.actions.reconnectTitle')}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                <span>{t('shell.actions.disconnect')}</span>
+                <span>{t('shell.actions.reconnect')}</span>
               </button>
             )}
 

@@ -190,8 +190,10 @@
     "actions": {
       "disconnect": "断开连接",
       "disconnectTitle": "断开 Shell 连接",
+      "reconnect": "重连",
+      "reconnectTitle": "重新连接并同步分辨率",
       "restart": "重启",
-      "restartTitle": "重启 Shell（请先断开连接）",
+      "restartTitle": "杀死并重启终端进程",
       "connect": "在 Shell 中继续",
       "connectTitle": "连接到 Shell"
     },

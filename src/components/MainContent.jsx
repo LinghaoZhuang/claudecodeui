@@ -27,6 +27,7 @@ import PRDEditor from './PRDEditor';
 import Tooltip from './Tooltip';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
+import { useCluster } from '../contexts/ClusterContext';
 import { api } from '../utils/api';
 
 function MainContent({
@@ -74,10 +75,15 @@ function MainContent({
   const [existingPRDs, setExistingPRDs] = useState([]);
   const [prdNotification, setPRDNotification] = useState(null);
 
-  // Track opened projects for persistent terminal instances
-  const [openedProjects, setOpenedProjects] = useState([]);
-  // Track opened sessions for persistent shell instances
-  const [openedSessions, setOpenedSessions] = useState([]);
+  // Track opened projects for persistent terminal instances (per client/server)
+  // Structure: { [clientId]: [project1, project2, ...] }
+  const [openedProjectsByClient, setOpenedProjectsByClient] = useState({});
+  // Track opened sessions for persistent shell instances (per client/server)
+  // Structure: { [clientId]: [{ session, project }, ...] }
+  const [openedSessionsByClient, setOpenedSessionsByClient] = useState({});
+
+  // Cluster context for per-server limits
+  const { selectedClientId } = useCluster();
   
   // TaskMaster context
   const { tasks, currentProject, refreshTasks, setCurrentProject } = useTaskMaster();
@@ -95,43 +101,47 @@ function MainContent({
 
   const MAX_SHELL_INSTANCES = 5;
 
-  // Track opened projects for persistent terminal instances
+  // Track opened projects for persistent terminal instances (per client/server)
   useEffect(() => {
     if (!selectedProject) return;
     const projectKey = selectedProject.fullPath || selectedProject.path;
     if (!projectKey) return;
+    const clientId = selectedClientId || 'local';
 
-    setOpenedProjects(prev => {
-      if (prev.some(p => (p.fullPath || p.path) === projectKey)) {
+    setOpenedProjectsByClient(prev => {
+      const clientProjects = prev[clientId] || [];
+      if (clientProjects.some(p => (p.fullPath || p.path) === projectKey)) {
         return prev;
       }
-      const next = [...prev, selectedProject];
-      // Evict oldest if over limit
+      let next = [...clientProjects, selectedProject];
+      // Evict oldest if over limit (per client)
       if (next.length > MAX_SHELL_INSTANCES) {
-        return next.slice(next.length - MAX_SHELL_INSTANCES);
+        next = next.slice(next.length - MAX_SHELL_INSTANCES);
       }
-      return next;
+      return { ...prev, [clientId]: next };
     });
-  }, [selectedProject]);
+  }, [selectedProject, selectedClientId]);
 
-  // Track opened sessions for persistent AI shell instances
+  // Track opened sessions for persistent AI shell instances (per client/server)
   useEffect(() => {
     if (!selectedSession || !selectedProject) return;
     const sessionKey = selectedSession.id;
     if (!sessionKey) return;
+    const clientId = selectedClientId || 'local';
 
-    setOpenedSessions(prev => {
-      if (prev.some(s => s.session.id === sessionKey)) {
+    setOpenedSessionsByClient(prev => {
+      const clientSessions = prev[clientId] || [];
+      if (clientSessions.some(s => s.session.id === sessionKey)) {
         return prev;
       }
-      const next = [...prev, { session: selectedSession, project: selectedProject }];
-      // Evict oldest if over limit
+      let next = [...clientSessions, { session: selectedSession, project: selectedProject }];
+      // Evict oldest if over limit (per client)
       if (next.length > MAX_SHELL_INSTANCES) {
-        return next.slice(next.length - MAX_SHELL_INSTANCES);
+        next = next.slice(next.length - MAX_SHELL_INSTANCES);
       }
-      return next;
+      return { ...prev, [clientId]: next };
     });
-  }, [selectedSession, selectedProject]);
+  }, [selectedSession, selectedProject, selectedClientId]);
 
   // Switch away from tasks tab when tasks are disabled or TaskMaster is not installed
   useEffect(() => {
@@ -565,8 +575,8 @@ function MainContent({
             <FileTree selectedProject={selectedProject} />
           </div>
         )}
-        {/* Render AI shell instances for each opened session */}
-        {openedSessions.map(({ session, project }) => {
+        {/* Render AI shell instances for each opened session (current client) */}
+        {(openedSessionsByClient[selectedClientId || 'local'] || []).map(({ session, project }) => {
           const isActive = activeTab === 'shell' && selectedSession?.id === session.id;
           return (
             <div key={`shell-${session.id}`} className={`h-full w-full overflow-hidden ${isActive ? 'block' : 'hidden'}`}>
@@ -579,7 +589,7 @@ function MainContent({
           );
         })}
         {/* Show placeholder when no session is selected for shell tab */}
-        {activeTab === 'shell' && !selectedSession && !openedSessions.some(s => s.session.id === selectedSession?.id) && (
+        {activeTab === 'shell' && !selectedSession && !(openedSessionsByClient[selectedClientId || 'local'] || []).some(s => s.session.id === selectedSession?.id) && (
           <div className="h-full w-full overflow-hidden">
             <StandaloneShell
               project={selectedProject}
@@ -588,8 +598,8 @@ function MainContent({
             />
           </div>
         )}
-        {/* Render terminal instances for each opened project */}
-        {openedProjects.map(project => {
+        {/* Render terminal instances for each opened project (current client) */}
+        {(openedProjectsByClient[selectedClientId || 'local'] || []).map(project => {
           const projectKey = project.fullPath || project.path;
           const currentKey = selectedProject?.fullPath || selectedProject?.path;
           const isActive = activeTab === 'terminal' && projectKey === currentKey;

@@ -190,8 +190,10 @@
     "actions": {
       "disconnect": "Disconnect",
       "disconnectTitle": "Disconnect from shell",
+      "reconnect": "Reconnect",
+      "reconnectTitle": "Reconnect and sync resolution",
       "restart": "Restart",
-      "restartTitle": "Restart Shell (disconnect first)",
+      "restartTitle": "Kill and restart the terminal process",
       "connect": "Continue in Shell",
       "connectTitle": "Connect to shell"
     },
