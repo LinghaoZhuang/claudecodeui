@@ -1054,7 +1054,8 @@ function handleShellConnection(ws) {
                 const commandSuffix = isPlainShell && initialCommand
                     ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
                     : '';
-                ptySessionKey = `${projectPath}_${sessionId || 'default'}${commandSuffix}`;
+                const shellPrefix = isPlainShell ? 'plain_' : '';
+                ptySessionKey = `${shellPrefix}${projectPath}_${sessionId || 'default'}${commandSuffix}`;
 
                 // Kill any existing login session before starting fresh
                 if (isLoginCommand) {
@@ -1121,11 +1122,15 @@ function handleShellConnection(ws) {
                     // Prepare the shell command adapted to the platform and provider
                     let shellCommand;
                     if (isPlainShell) {
-                        // Plain shell mode - just run the initial command in the project directory
+                        // Plain shell mode - just run the initial command or open a shell in the project directory
                         if (os.platform() === 'win32') {
-                            shellCommand = `Set-Location -Path "${projectPath}"; ${initialCommand}`;
+                            shellCommand = initialCommand
+                                ? `Set-Location -Path "${projectPath}"; ${initialCommand}`
+                                : `Set-Location -Path "${projectPath}"`;
                         } else {
-                            shellCommand = `cd "${projectPath}" && ${initialCommand}`;
+                            shellCommand = initialCommand
+                                ? `cd "${projectPath}" && ${initialCommand}`
+                                : `cd "${projectPath}" && exec bash`;
                         }
                     } else if (provider === 'cursor') {
                         // Use cursor-agent command
