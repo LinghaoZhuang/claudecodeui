@@ -795,6 +795,7 @@ async function parseJsonlSessions(filePath) {
 
               if (typeof textContent === 'string' && textContent.length > 0 && !isSystemMessage) {
                 session.lastUserMessage = textContent;
+                session.messageCount++;  // Only count real user messages
               }
             } else if (entry.message?.role === 'assistant' && entry.message?.content) {
               // Skip API error messages using the isApiErrorMessage flag
@@ -826,8 +827,6 @@ async function parseJsonlSessions(filePath) {
                 }
               }
             }
-
-            session.messageCount++;
 
             if (entry.timestamp) {
               session.lastActivity = new Date(entry.timestamp);
