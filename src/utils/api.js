@@ -151,6 +151,11 @@ export const api = {
   newSessionMessages: (projectName, sessionId, afterCount = 0) => {
     return authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/messages/new?afterCount=${afterCount}`);
   },
+  // Sync messages since a specific timestamp (for incremental sync with caching)
+  // This is the primary API for the new message caching system
+  syncMessages: (projectName, sessionId, sinceTimestamp = 0) => {
+    return authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/messages/sync?since=${sinceTimestamp}`);
+  },
   renameProject: (projectName, displayName) =>
     authenticatedFetch(`/api/projects/${projectName}/rename`, {
       method: 'PUT',

@@ -57,7 +57,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, getSessionMessages, getNewSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getSessions, getSessionMessages, getNewSessionMessages, getMessagesSince, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -199,6 +199,7 @@ const server = http.createServer(app);
 
 const ptySessionsMap = new Map();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+const MAX_SHELLS_PER_TYPE = 3; // Max shells per type (plain / claude / cursor)
 
 // Single WebSocket server that handles both paths
 const wss = new WebSocketServer({
@@ -481,6 +482,23 @@ app.get('/api/projects/:projectName/sessions/:sessionId/messages/new', authentic
 
         res.json(result);
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Sync messages since a specific timestamp (for incremental sync with caching)
+// This is the primary API for the new message caching system
+app.get('/api/projects/:projectName/sessions/:sessionId/messages/sync', authenticateToken, async (req, res) => {
+    try {
+        const { projectName, sessionId } = req.params;
+        const { since } = req.query;
+
+        const sinceTimestamp = since ? parseInt(since, 10) : 0;
+        const result = await getMessagesSince(projectName, sessionId, sinceTimestamp);
+
+        res.json(result);
+    } catch (error) {
+        console.error(`[API] Error syncing messages for session ${req.params.sessionId}:`, error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -1159,6 +1177,41 @@ function handleShellConnection(ws) {
                 console.log('🤖 Provider:', isPlainShell ? 'plain-shell' : provider);
                 if (initialCommand) {
                     console.log('⚡ Initial command:', initialCommand);
+                }
+
+                // Enforce per-type shell limit: evict oldest sessions when at capacity
+                const shellType = isPlainShell ? 'plain' : provider;
+                const typePrefix = isPlainShell ? 'plain_' : '';
+                const sameSessions = [];
+                for (const [key, session] of ptySessionsMap.entries()) {
+                    const isPlainKey = key.startsWith('plain_');
+                    if (isPlainShell && isPlainKey) {
+                        sameSessions.push({ key, session });
+                    } else if (!isPlainShell && !isPlainKey) {
+                        sameSessions.push({ key, session });
+                    }
+                }
+                if (sameSessions.length >= MAX_SHELLS_PER_TYPE) {
+                    // Sort by number of active clients (ascending), then evict those with fewest clients first
+                    sameSessions.sort((a, b) => a.session.clients.size - b.session.clients.size);
+                    const toEvict = sameSessions.length - MAX_SHELLS_PER_TYPE + 1;
+                    for (let i = 0; i < toEvict; i++) {
+                        const { key, session } = sameSessions[i];
+                        console.log(`🧹 Evicting ${shellType} shell (limit ${MAX_SHELLS_PER_TYPE}):`, key);
+                        if (session.timeoutId) clearTimeout(session.timeoutId);
+                        // Notify connected clients before killing
+                        session.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: 'output',
+                                    data: `\r\n\x1b[33m[Terminal closed: max ${MAX_SHELLS_PER_TYPE} ${shellType} shells reached]\x1b[0m\r\n`
+                                }));
+                                client.send(JSON.stringify({ type: 'exit', code: -1 }));
+                            }
+                        });
+                        if (session.pty && session.pty.kill) session.pty.kill();
+                        ptySessionsMap.delete(key);
+                    }
                 }
 
                 // First send a welcome message

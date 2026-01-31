@@ -1001,6 +1001,70 @@ async function getNewSessionMessages(projectName, sessionId, afterCount = 0) {
   }
 }
 
+// Get messages since a specific timestamp (for incremental sync)
+// This is the primary API for the new message caching system
+async function getMessagesSince(projectName, sessionId, sinceTimestamp = 0) {
+  const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
+  const serverTimestamp = Date.now();
+
+  try {
+    const files = await fs.readdir(projectDir);
+    const jsonlFiles = files.filter(file => file.endsWith('.jsonl') && !file.startsWith('agent-'));
+
+    if (jsonlFiles.length === 0) {
+      return { messages: [], serverTimestamp, total: 0, synced: 0 };
+    }
+
+    const allMessages = [];
+    const newMessages = [];
+    const sinceTime = sinceTimestamp ? new Date(sinceTimestamp).getTime() : 0;
+
+    for (const file of jsonlFiles) {
+      const jsonlFile = path.join(projectDir, file);
+      const fileStream = fsSync.createReadStream(jsonlFile);
+      const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity
+      });
+
+      for await (const line of rl) {
+        if (line.trim()) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.sessionId === sessionId) {
+              allMessages.push(entry);
+
+              // Check if this message is newer than sinceTimestamp
+              const msgTime = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
+              if (msgTime > sinceTime) {
+                newMessages.push(entry);
+              }
+            }
+          } catch (parseError) {
+            // Skip malformed lines
+          }
+        }
+      }
+    }
+
+    // Sort new messages by timestamp
+    newMessages.sort((a, b) =>
+      new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
+    );
+
+    return {
+      messages: newMessages,
+      serverTimestamp,
+      total: allMessages.length,
+      synced: newMessages.length,
+      hasMore: false // We return all new messages at once
+    };
+  } catch (error) {
+    console.error(`Error syncing messages for session ${sessionId}:`, error);
+    return { messages: [], serverTimestamp, total: 0, synced: 0 };
+  }
+}
+
 // Rename a project's display name
 async function renameProject(projectName, newDisplayName) {
   const config = await loadProjectConfig();
@@ -1725,6 +1789,7 @@ export {
   getSessions,
   getSessionMessages,
   getNewSessionMessages,
+  getMessagesSince,
   parseJsonlSessions,
   renameProject,
   deleteSession,

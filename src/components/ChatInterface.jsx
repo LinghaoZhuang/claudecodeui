@@ -36,6 +36,7 @@ import ClaudeStatus from './ClaudeStatus';
 import TokenUsagePie from './TokenUsagePie';
 import { MicButton } from './MicButton.jsx';
 import { api, authenticatedFetch } from '../utils/api';
+import messageCache from '../utils/messageCache';
 import ThinkingModeSelector, { thinkingModes } from './ThinkingModeSelector.jsx';
 import Fuse from 'fuse.js';
 import CommandMenu from './CommandMenu';
@@ -1992,7 +1993,29 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   useEffect(() => {
     setPendingPermissionRequests(prev => prev.filter(req => !req.sessionId || req.sessionId === selectedSession?.id));
   }, [selectedSession?.id]);
-  
+
+  // Initialize IndexedDB message cache on mount
+  // Also migrate data from localStorage if needed (one-time migration)
+  useEffect(() => {
+    const initCache = async () => {
+      try {
+        await messageCache.init();
+        console.log('[MessageCache] IndexedDB initialized');
+
+        // Attempt migration from localStorage for current project
+        if (selectedProject) {
+          const migrated = await messageCache.migrateFromLocalStorage(selectedProject.name);
+          if (migrated) {
+            console.log(`[MessageCache] Migrated localStorage data for ${selectedProject.name}`);
+          }
+        }
+      } catch (error) {
+        console.warn('[MessageCache] Initialization error:', error);
+      }
+    };
+    initCache();
+  }, [selectedProject?.name]);
+
   // Load Cursor default model from config
   useEffect(() => {
     if (provider === 'cursor') {
@@ -2769,6 +2792,18 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     return diffLines;
   };
 
+  // Generate a stable unique ID for a message
+  const generateMessageId = (msg, index, timestamp) => {
+    // Cursor messages have rowid
+    if (msg.rowid) return `cursor-${msg.rowid}`;
+    if (msg.blobId) return `cursor-blob-${msg.blobId}`;
+    // Use timestamp + type + toolCallId combination for Claude/Codex
+    const ts = timestamp || msg.timestamp || Date.now();
+    const type = msg.type || msg.message?.role || 'unknown';
+    const toolId = msg.toolCallId || msg.toolId || '';
+    return `msg-${ts}-${type}-${toolId}-${index}`;
+  };
+
   const convertSessionMessages = (rawMessages) => {
     const converted = [];
     const toolResults = new Map(); // Map tool_use_id to tool result
@@ -2829,30 +2864,36 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         if (!shouldSkip) {
           // Unescape with math formula protection
           content = unescapeWithMathProtection(content);
+          const timestamp = msg.timestamp || new Date().toISOString();
           converted.push({
+            id: generateMessageId(msg, converted.length, timestamp),
             type: messageType,
             content: content,
-            timestamp: msg.timestamp || new Date().toISOString()
+            timestamp: timestamp
           });
         }
       }
-      
+
       // Handle thinking messages (Codex reasoning)
       else if (msg.type === 'thinking' && msg.message?.content) {
+        const timestamp = msg.timestamp || new Date().toISOString();
         converted.push({
+          id: generateMessageId(msg, converted.length, timestamp),
           type: 'assistant',
           content: unescapeWithMathProtection(msg.message.content),
-          timestamp: msg.timestamp || new Date().toISOString(),
+          timestamp: timestamp,
           isThinking: true
         });
       }
 
       // Handle tool_use messages (Codex function calls)
       else if (msg.type === 'tool_use' && msg.toolName) {
+        const timestamp = msg.timestamp || new Date().toISOString();
         converted.push({
+          id: generateMessageId(msg, converted.length, timestamp),
           type: 'assistant',
           content: '',
-          timestamp: msg.timestamp || new Date().toISOString(),
+          timestamp: timestamp,
           isToolUse: true,
           toolName: msg.toolName,
           toolInput: msg.toolInput || '',
@@ -2886,19 +2927,23 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
               if (typeof text === 'string') {
                 text = unescapeWithMathProtection(text);
               }
+              const timestamp = msg.timestamp || new Date().toISOString();
               converted.push({
+                id: generateMessageId(msg, converted.length, timestamp),
                 type: 'assistant',
                 content: text,
-                timestamp: msg.timestamp || new Date().toISOString()
+                timestamp: timestamp
               });
             } else if (part.type === 'tool_use') {
               // Get the corresponding tool result
               const toolResult = toolResults.get(part.id);
+              const timestamp = msg.timestamp || new Date().toISOString();
 
               converted.push({
+                id: `tool-${part.id || converted.length}-${timestamp}`,
                 type: 'assistant',
                 content: '',
-                timestamp: msg.timestamp || new Date().toISOString(),
+                timestamp: timestamp,
                 isToolUse: true,
                 toolName: part.name,
                 toolInput: JSON.stringify(part.input),
@@ -2916,15 +2961,17 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           // Unescape with math formula protection
           let text = msg.message.content;
           text = unescapeWithMathProtection(text);
+          const timestamp = msg.timestamp || new Date().toISOString();
           converted.push({
+            id: generateMessageId(msg, converted.length, timestamp),
             type: 'assistant',
             content: text,
-            timestamp: msg.timestamp || new Date().toISOString()
+            timestamp: timestamp
           });
         }
       }
     }
-    
+
     return converted;
   };
 
@@ -2979,6 +3026,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
         };
         // Prepend new messages to the existing ones
         setSessionMessages(prev => [...moreMessages, ...prev]);
+        // Also update chatMessages directly
+        const convertedMore = convertSessionMessages(moreMessages);
+        setChatMessages(prev => [...convertedMore, ...prev]);
       }
       return true;
     } finally {
@@ -3046,6 +3096,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     let cancelled = false;
 
     // Load session messages when session changes
+    // NEW: Cache-first loading strategy for instant display
     const loadMessages = async () => {
       if (selectedSession && selectedProject) {
         const provider = localStorage.getItem('selected-provider') || 'claude';
@@ -3122,19 +3173,163 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             // Reset the flag after handling system session change
             setIsSystemSessionChange(false);
           }
+        } else if (provider === 'codex') {
+          // For Codex, load messages normally (no caching for now)
+          setCurrentSessionId(selectedSession.id);
+
+          if (!isSystemSessionChange) {
+            const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, 'codex');
+            if (cancelled) return;
+            setSessionMessages(messages);
+            const converted = convertSessionMessages(messages);
+            setChatMessages(converted);
+            setIsLoadingSessionMessages(false);
+            setTimeout(() => scrollToBottom(), 100);
+          } else {
+            setIsSystemSessionChange(false);
+          }
         } else {
-          // For Claude, load messages normally with pagination
+          // For Claude: use cache-first loading strategy
           setCurrentSessionId(selectedSession.id);
 
           // Only load messages from API if this is a user-initiated session change
           // For system-initiated changes, preserve existing messages and rely on WebSocket
           if (!isSystemSessionChange) {
-            const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
-            // Race condition check: ignore stale response if session changed during fetch
-            if (cancelled) return;
-            setSessionMessages(messages);
-            // convertedMessages will be automatically updated via useMemo
-            // Scroll will be handled by the main scroll useEffect after messages are rendered
+            // STEP 1: Try to load from IndexedDB cache (instant display)
+            let cachedMessages = [];
+            let lastSyncTimestamp = 0;
+
+            try {
+              // Initialize cache if needed
+              await messageCache.init();
+
+              // Load cached messages
+              const cachedRecords = await messageCache.getMessages(selectedSession.id);
+              if (cachedRecords.length > 0) {
+                // Convert cached rawData back to messages
+                cachedMessages = cachedRecords.map(r => r.rawData);
+                const converted = convertSessionMessages(cachedMessages);
+
+                // Race condition check
+                if (cancelled) return;
+
+                // Instant display from cache
+                setSessionMessages(cachedMessages);
+                setChatMessages(converted);
+                setIsLoadingSessionMessages(false);
+
+                // Scroll to bottom after cache display - use requestAnimationFrame for proper timing
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    scrollToBottom();
+                  });
+                });
+
+                console.log(`[MessageCache] Loaded ${cachedMessages.length} messages from cache for session ${selectedSession.id}`);
+              }
+
+              // Get last sync timestamp
+              const syncState = await messageCache.getSyncState(selectedSession.id);
+              if (syncState) {
+                lastSyncTimestamp = syncState.lastSyncTimestamp;
+              }
+            } catch (cacheError) {
+              console.warn('[MessageCache] Error loading from cache:', cacheError);
+              // Continue with API fallback
+            }
+
+            // STEP 2: Sync new messages from server in background
+            try {
+              const syncResponse = await api.syncMessages(selectedProject.name, selectedSession.id, lastSyncTimestamp);
+
+              if (cancelled) return;
+
+              if (syncResponse.ok) {
+                const syncData = await syncResponse.json();
+                const newMessages = syncData.messages || [];
+
+                if (newMessages.length > 0) {
+                  console.log(`[MessageCache] Syncing ${newMessages.length} new messages from server`);
+
+                  // Save new messages to cache
+                  await messageCache.saveMessages(newMessages, selectedSession.id, selectedProject.name);
+
+                  // Update sync state
+                  await messageCache.updateSyncState(
+                    selectedSession.id,
+                    syncData.serverTimestamp,
+                    syncData.total
+                  );
+
+                  // Convert and append new messages
+                  const newConverted = convertSessionMessages(newMessages);
+
+                  if (cachedMessages.length > 0) {
+                    // Append to existing cached messages
+                    setSessionMessages(prev => [...prev, ...newMessages]);
+                    setChatMessages(prev => [...prev, ...newConverted]);
+                  } else {
+                    // No cache, set all messages
+                    setSessionMessages(newMessages);
+                    setChatMessages(newConverted);
+                  }
+
+                  // Update pagination state
+                  setTotalMessages(syncData.total);
+                  setHasMoreMessages(false); // sync returns all new messages
+
+                  // Scroll to bottom after appending new messages
+                  setTimeout(() => scrollToBottom(), 100);
+
+                } else if (cachedMessages.length === 0) {
+                  // No cache and no new messages - try full load as fallback
+                  const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
+                  if (cancelled) return;
+
+                  setSessionMessages(messages);
+                  const converted = convertSessionMessages(messages);
+                  setChatMessages(converted);
+
+                  // Save to cache for next time
+                  if (messages.length > 0) {
+                    await messageCache.saveMessages(messages, selectedSession.id, selectedProject.name);
+                    await messageCache.updateSyncState(selectedSession.id, Date.now(), messages.length);
+                  }
+
+                  // Scroll to bottom for fresh load
+                  setTimeout(() => scrollToBottom(), 100);
+                }
+                // else: cachedMessages already displayed and scrolled, no need to scroll again
+
+                setIsLoadingSessionMessages(false);
+              } else {
+                // Sync failed - fall back to traditional loading if no cache
+                if (cachedMessages.length === 0) {
+                  const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
+                  if (cancelled) return;
+                  setSessionMessages(messages);
+                  const converted = convertSessionMessages(messages);
+                  setChatMessages(converted);
+                  // Scroll to bottom for fresh load
+                  setTimeout(() => scrollToBottom(), 100);
+                }
+                setIsLoadingSessionMessages(false);
+              }
+            } catch (syncError) {
+              console.warn('[MessageCache] Sync error:', syncError);
+              // If we have cached messages, keep showing them
+              // If not, fall back to traditional loading
+              if (cachedMessages.length === 0) {
+                const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
+                if (cancelled) return;
+                setSessionMessages(messages);
+                const converted = convertSessionMessages(messages);
+                setChatMessages(converted);
+                // Scroll to bottom for fresh load
+                setTimeout(() => scrollToBottom(), 100);
+              }
+              setIsLoadingSessionMessages(false);
+            }
           } else {
             // Reset the flag after handling system session change
             setIsSystemSessionChange(false);
@@ -3177,6 +3372,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   // External Message Update Handler: Incrementally append new messages when external CLI modifies current session
   // This triggers when App.jsx detects a JSONL file change for the currently-viewed session
   // Only appends new messages instead of reloading the entire list - no DOM disruption
+  // NEW: Also saves to IndexedDB cache for offline access
   useEffect(() => {
     if (externalMessageUpdate > 0 && selectedSession && selectedProject) {
       const appendNewMessages = async () => {
@@ -3189,24 +3385,77 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
             setSessionMessages([]);
             setChatMessages(converted);
-          } else {
-            // Incremental update: only fetch messages after the current count
+          } else if (provider === 'codex') {
+            // Codex uses count-based incremental update
             const currentCount = sessionMessages.length;
             const response = await api.newSessionMessages(selectedProject.name, selectedSession.id, currentCount);
 
             if (response.ok) {
               const data = await response.json();
-              const newMessages = data.messages || [];
+              const newRawMessages = data.messages || [];
 
-              if (newMessages.length > 0) {
-                // Append new messages to existing list
-                setSessionMessages(prev => [...prev, ...newMessages]);
-                // convertedMessages will auto-update via useMemo, then chatMessages via useEffect
+              if (newRawMessages.length > 0) {
+                const newConverted = convertSessionMessages(newRawMessages);
+                setSessionMessages(prev => [...prev, ...newRawMessages]);
+                setChatMessages(prev => [...prev, ...newConverted]);
+
+                if (isNearBottom()) {
+                  requestAnimationFrame(() => {
+                    scrollContainerRef.current?.scrollTo({
+                      top: scrollContainerRef.current.scrollHeight,
+                      behavior: 'smooth'
+                    });
+                  });
+                }
+              }
+            }
+          } else {
+            // Claude: Use timestamp-based sync API with caching
+            // Get the last sync timestamp from cache
+            let lastSyncTimestamp = 0;
+            try {
+              const syncState = await messageCache.getSyncState(selectedSession.id);
+              if (syncState) {
+                lastSyncTimestamp = syncState.lastSyncTimestamp;
+              }
+            } catch (cacheError) {
+              console.warn('[MessageCache] Error getting sync state:', cacheError);
+            }
+
+            // Fetch new messages since last sync
+            const response = await api.syncMessages(selectedProject.name, selectedSession.id, lastSyncTimestamp);
+
+            if (response.ok) {
+              const data = await response.json();
+              const newRawMessages = data.messages || [];
+
+              if (newRawMessages.length > 0) {
+                // Convert only the new messages and append directly to chatMessages
+                const newConverted = convertSessionMessages(newRawMessages);
+
+                // Update sessionMessages for consistency
+                setSessionMessages(prev => [...prev, ...newRawMessages]);
+
+                // Directly append to chatMessages - this is the key to avoiding re-render of existing messages
+                setChatMessages(prev => [...prev, ...newConverted]);
+
+                // Save new messages to cache
+                try {
+                  await messageCache.saveMessages(newRawMessages, selectedSession.id, selectedProject.name);
+                  await messageCache.updateSyncState(selectedSession.id, data.serverTimestamp, data.total);
+                  console.log(`[MessageCache] Cached ${newRawMessages.length} new messages from external update`);
+                } catch (cacheError) {
+                  console.warn('[MessageCache] Error saving to cache:', cacheError);
+                }
 
                 // Smart scroll: only auto-scroll if user is near bottom
-                const shouldAutoScroll = autoScrollToBottom && isNearBottom();
-                if (shouldAutoScroll) {
-                  setTimeout(() => scrollToBottom(), 200);
+                if (isNearBottom()) {
+                  requestAnimationFrame(() => {
+                    scrollContainerRef.current?.scrollTo({
+                      top: scrollContainerRef.current.scrollHeight,
+                      behavior: 'smooth'
+                    });
+                  });
                 }
               }
               // If no new messages, nothing to do - user's view is unchanged
@@ -3219,7 +3468,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
 
       appendNewMessages();
     }
-  }, [externalMessageUpdate, selectedSession, selectedProject, loadCursorSessionMessages, sessionMessages.length, isNearBottom, autoScrollToBottom, scrollToBottom]);
+  }, [externalMessageUpdate, selectedSession, selectedProject, loadCursorSessionMessages, sessionMessages.length, isNearBottom]);
 
   // When the user navigates to a specific session, clear any pending "new session" marker.
   useEffect(() => {
@@ -3228,14 +3477,11 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     }
   }, [selectedSession?.id]);
 
-  // Update chatMessages when convertedMessages changes
-  useEffect(() => {
-    if (sessionMessages.length > 0) {
-      setChatMessages(convertedMessages);
-      // Reset loading state after chatMessages is updated
-      setIsLoadingSessionMessages(false);
-    }
-  }, [convertedMessages, sessionMessages]);
+  // NOTE: chatMessages is now set directly in:
+  // 1. Session loading (above) - for initial load
+  // 2. External message update handler - for incremental updates
+  // 3. WebSocket message handlers - for real-time streaming
+  // No longer relying on sessionMessages -> convertedMessages -> chatMessages chain for updates
 
   // Notify parent when input focus changes
   useEffect(() => {
@@ -3858,7 +4104,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
               onSessionNotProcessing(completedSessionId);
             }
           }
-          
+
           // If we have a pending session ID and the conversation completed successfully, use it
           const pendingSessionId = sessionStorage.getItem('pendingSessionId');
           if (pendingSessionId && !currentSessionId && latestMessage.exitCode === 0) {
@@ -3868,9 +4114,25 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             // No need to manually refresh - projects_updated WebSocket message will handle it
             console.log('✅ New session complete, ID set to:', pendingSessionId);
           }
-          
-          // Clear persisted chat messages after successful completion
-          if (selectedProject && latestMessage.exitCode === 0) {
+
+          // Save current chatMessages to IndexedDB cache for offline access
+          // This happens after conversation completes so we capture the full history
+          if (selectedProject && completedSessionId && latestMessage.exitCode === 0) {
+            (async () => {
+              try {
+                // Get the current session messages from sessionMessages state (raw format)
+                // These are the messages as received from the server
+                if (sessionMessages.length > 0) {
+                  await messageCache.saveMessages(sessionMessages, completedSessionId, selectedProject.name);
+                  await messageCache.updateSyncState(completedSessionId, Date.now(), sessionMessages.length);
+                  console.log(`[MessageCache] Saved ${sessionMessages.length} messages to cache on session complete`);
+                }
+              } catch (cacheError) {
+                console.warn('[MessageCache] Error saving on session complete:', cacheError);
+              }
+            })();
+
+            // Also clear the legacy localStorage cache
             safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
           }
           // Conversation finished; clear any stale permission prompts.
@@ -4254,29 +4516,13 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     }
   });
 
-  useEffect(() => {
-    // Auto-scroll to bottom when new messages arrive
-    if (scrollContainerRef.current && chatMessages.length > 0) {
-      if (autoScrollToBottom) {
-        // If auto-scroll is enabled, always scroll to bottom unless user has manually scrolled up
-        if (!isUserScrolledUp) {
-          setTimeout(() => scrollToBottom(), 50); // Small delay to ensure DOM is updated
-        }
-      } else {
-        // When auto-scroll is disabled, preserve the visual position
-        const container = scrollContainerRef.current;
-        const prevHeight = scrollPositionRef.current.height;
-        const prevTop = scrollPositionRef.current.top;
-        const newHeight = container.scrollHeight;
-        const heightDiff = newHeight - prevHeight;
-
-        // If content was added above the current view, adjust scroll position
-        if (heightDiff > 0 && prevTop > 0) {
-          container.scrollTop = prevTop + heightDiff;
-        }
-      }
-    }
-  }, [chatMessages.length, isUserScrolledUp, scrollToBottom, autoScrollToBottom]);
+  // NOTE: Removed the chatMessages.length-dependent auto-scroll useEffect
+  // This was causing unwanted scrolling whenever messages were added/updated
+  // Now scrolling is only triggered explicitly:
+  // 1. User clicks the "scroll to bottom" button
+  // 2. User sends a message
+  // 3. Session switch (initial load)
+  // 4. External message update when user is near bottom
 
   // Scroll to bottom when messages first load after session switch
   useEffect(() => {
@@ -5241,10 +5487,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
             
             {visibleMessages.map((message, index) => {
               const prevMessage = index > 0 ? visibleMessages[index - 1] : null;
-              
+
               return (
                 <MessageComponent
-                  key={index}
+                  key={message.id || `fallback-${index}`}
                   message={message}
                   index={index}
                   prevMessage={prevMessage}
