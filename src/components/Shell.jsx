@@ -54,7 +54,6 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   const [isConnected, setIsConnected] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [lastSessionId, setLastSessionId] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
   const selectedProjectRef = useRef(selectedProject);
@@ -247,15 +246,8 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
     }, 200);
   };
 
-  useEffect(() => {
-    const currentSessionId = selectedSession?.id || null;
-
-    if (lastSessionId !== null && lastSessionId !== currentSessionId && isInitialized) {
-      disconnectFromShell();
-    }
-
-    setLastSessionId(currentSessionId);
-  }, [selectedSession?.id, isInitialized, disconnectFromShell]);
+  // Terminal connection persists across session/project changes
+  // User can manually restart if needed
 
   useEffect(() => {
     if (!terminalRef.current || !selectedProject || isRestarting || terminal.current) {

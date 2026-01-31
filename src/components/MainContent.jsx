@@ -73,6 +73,11 @@ function MainContent({
   const [selectedPRD, setSelectedPRD] = useState(null);
   const [existingPRDs, setExistingPRDs] = useState([]);
   const [prdNotification, setPRDNotification] = useState(null);
+
+  // Track opened projects for persistent terminal instances
+  const [openedProjects, setOpenedProjects] = useState([]);
+  // Track opened sessions for persistent shell instances
+  const [openedSessions, setOpenedSessions] = useState([]);
   
   // TaskMaster context
   const { tasks, currentProject, refreshTasks, setCurrentProject } = useTaskMaster();
@@ -87,6 +92,34 @@ function MainContent({
       setCurrentProject(selectedProject);
     }
   }, [selectedProject, currentProject, setCurrentProject]);
+
+  // Track opened projects for persistent terminal instances
+  useEffect(() => {
+    if (!selectedProject) return;
+    const projectKey = selectedProject.fullPath || selectedProject.path;
+    if (!projectKey) return;
+
+    setOpenedProjects(prev => {
+      if (prev.some(p => (p.fullPath || p.path) === projectKey)) {
+        return prev;
+      }
+      return [...prev, selectedProject];
+    });
+  }, [selectedProject]);
+
+  // Track opened sessions for persistent AI shell instances
+  useEffect(() => {
+    if (!selectedSession || !selectedProject) return;
+    const sessionKey = selectedSession.id;
+    if (!sessionKey) return;
+
+    setOpenedSessions(prev => {
+      if (prev.some(s => s.session.id === sessionKey)) {
+        return prev;
+      }
+      return [...prev, { session: selectedSession, project: selectedProject }];
+    });
+  }, [selectedSession, selectedProject]);
 
   // Switch away from tasks tab when tasks are disabled or TaskMaster is not installed
   useEffect(() => {
@@ -520,24 +553,44 @@ function MainContent({
             <FileTree selectedProject={selectedProject} />
           </div>
         )}
-        {activeTab === 'shell' && (
+        {/* Render AI shell instances for each opened session */}
+        {openedSessions.map(({ session, project }) => {
+          const isActive = activeTab === 'shell' && selectedSession?.id === session.id;
+          return (
+            <div key={`shell-${session.id}`} className={`h-full w-full overflow-hidden ${isActive ? 'block' : 'hidden'}`}>
+              <StandaloneShell
+                project={project}
+                session={session}
+                showHeader={false}
+              />
+            </div>
+          );
+        })}
+        {/* Show placeholder when no session is selected for shell tab */}
+        {activeTab === 'shell' && !selectedSession && !openedSessions.some(s => s.session.id === selectedSession?.id) && (
           <div className="h-full w-full overflow-hidden">
             <StandaloneShell
               project={selectedProject}
-              session={selectedSession}
+              session={null}
               showHeader={false}
             />
           </div>
         )}
-        {activeTab === 'terminal' && (
-          <div className="h-full w-full overflow-hidden">
-            <StandaloneShell
-              project={selectedProject}
-              isPlainShell={true}
-              showHeader={false}
-            />
-          </div>
-        )}
+        {/* Render terminal instances for each opened project */}
+        {openedProjects.map(project => {
+          const projectKey = project.fullPath || project.path;
+          const currentKey = selectedProject?.fullPath || selectedProject?.path;
+          const isActive = activeTab === 'terminal' && projectKey === currentKey;
+          return (
+            <div key={`terminal-${projectKey}`} className={`h-full w-full overflow-hidden ${isActive ? 'block' : 'hidden'}`}>
+              <StandaloneShell
+                project={project}
+                isPlainShell={true}
+                showHeader={false}
+              />
+            </div>
+          );
+        })}
         {activeTab === 'git' && (
           <div className="h-full overflow-hidden">
             <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
