@@ -19,7 +19,8 @@
   },
   "tabs": {
     "chat": "Chat",
-    "shell": "Shell",
+    "shell": "AI Shell",
+    "terminal": "Terminal",
     "files": "Files",
     "git": "Source Control",
     "tasks": "Tasks"
