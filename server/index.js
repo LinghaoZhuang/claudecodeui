@@ -57,7 +57,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
+import { getProjects, getSessions, getSessionMessages, getNewSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -465,6 +465,21 @@ app.get('/api/projects/:projectName/sessions/:sessionId/messages', authenticateT
             // New format with pagination info
             res.json(result);
         }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get only new messages after a specific count (for incremental updates)
+app.get('/api/projects/:projectName/sessions/:sessionId/messages/new', authenticateToken, async (req, res) => {
+    try {
+        const { projectName, sessionId } = req.params;
+        const { afterCount } = req.query;
+
+        const parsedAfterCount = afterCount ? parseInt(afterCount, 10) : 0;
+        const result = await getNewSessionMessages(projectName, sessionId, parsedAfterCount);
+
+        res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

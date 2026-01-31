@@ -882,13 +882,13 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
     // agent-*.jsonl files contain session start data at this point. This needs to be revisited
     // periodically to make sure only accurate data is there and no new functionality is added there
     const jsonlFiles = files.filter(file => file.endsWith('.jsonl') && !file.startsWith('agent-'));
-    
+
     if (jsonlFiles.length === 0) {
       return { messages: [], total: 0, hasMore: false };
     }
-    
+
     const messages = [];
-    
+
     // Process all JSONL files to find messages for this session
     for (const file of jsonlFiles) {
       const jsonlFile = path.join(projectDir, file);
@@ -897,7 +897,7 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
         input: fileStream,
         crlfDelay: Infinity
       });
-      
+
       for await (const line of rl) {
         if (line.trim()) {
           try {
@@ -911,26 +911,26 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
         }
       }
     }
-    
+
     // Sort messages by timestamp
-    const sortedMessages = messages.sort((a, b) => 
+    const sortedMessages = messages.sort((a, b) =>
       new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
     );
-    
+
     const total = sortedMessages.length;
-    
+
     // If no limit is specified, return all messages (backward compatibility)
     if (limit === null) {
       return sortedMessages;
     }
-    
+
     // Apply pagination - for recent messages, we need to slice from the end
     // offset 0 should give us the most recent messages
     const startIndex = Math.max(0, total - offset - limit);
     const endIndex = total - offset;
     const paginatedMessages = sortedMessages.slice(startIndex, endIndex);
     const hasMore = startIndex > 0;
-    
+
     return {
       messages: paginatedMessages,
       total,
@@ -941,6 +941,63 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
   } catch (error) {
     console.error(`Error reading messages for session ${sessionId}:`, error);
     return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+  }
+}
+
+// Get only new messages after a specific count (for incremental updates)
+async function getNewSessionMessages(projectName, sessionId, afterCount = 0) {
+  const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
+
+  try {
+    const files = await fs.readdir(projectDir);
+    const jsonlFiles = files.filter(file => file.endsWith('.jsonl') && !file.startsWith('agent-'));
+
+    if (jsonlFiles.length === 0) {
+      return { messages: [], total: 0 };
+    }
+
+    const messages = [];
+
+    for (const file of jsonlFiles) {
+      const jsonlFile = path.join(projectDir, file);
+      const fileStream = fsSync.createReadStream(jsonlFile);
+      const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity
+      });
+
+      for await (const line of rl) {
+        if (line.trim()) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.sessionId === sessionId) {
+              messages.push(entry);
+            }
+          } catch (parseError) {
+            console.warn('Error parsing line:', parseError.message);
+          }
+        }
+      }
+    }
+
+    // Sort messages by timestamp
+    const sortedMessages = messages.sort((a, b) =>
+      new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
+    );
+
+    const total = sortedMessages.length;
+
+    // Return only messages after the specified count
+    const newMessages = sortedMessages.slice(afterCount);
+
+    return {
+      messages: newMessages,
+      total,
+      previousCount: afterCount
+    };
+  } catch (error) {
+    console.error(`Error reading new messages for session ${sessionId}:`, error);
+    return { messages: [], total: 0 };
   }
 }
 
@@ -1667,6 +1724,7 @@ export {
   getProjects,
   getSessions,
   getSessionMessages,
+  getNewSessionMessages,
   parseJsonlSessions,
   renameProject,
   deleteSession,

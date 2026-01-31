@@ -147,6 +147,10 @@ export const api = {
     }
     return authenticatedFetch(url);
   },
+  // Get only new messages after a specific count (for incremental updates)
+  newSessionMessages: (projectName, sessionId, afterCount = 0) => {
+    return authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/messages/new?afterCount=${afterCount}`);
+  },
   renameProject: (projectName, displayName) =>
     authenticatedFetch(`/api/projects/${projectName}/rename`, {
       method: 'PUT',

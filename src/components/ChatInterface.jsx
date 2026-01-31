@@ -3174,42 +3174,52 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     };
   }, [selectedSession, selectedProject, loadCursorSessionMessages, scrollToBottom, isSystemSessionChange, resetStreamingState]);
 
-  // External Message Update Handler: Reload messages when external CLI modifies current session
+  // External Message Update Handler: Incrementally append new messages when external CLI modifies current session
   // This triggers when App.jsx detects a JSONL file change for the currently-viewed session
-  // Only reloads if the session is NOT active (respecting Session Protection System)
+  // Only appends new messages instead of reloading the entire list - no DOM disruption
   useEffect(() => {
     if (externalMessageUpdate > 0 && selectedSession && selectedProject) {
-      const reloadExternalMessages = async () => {
+      const appendNewMessages = async () => {
         try {
           const provider = localStorage.getItem('selected-provider') || 'claude';
 
           if (provider === 'cursor') {
-            // Reload Cursor messages from SQLite
+            // Cursor still needs full reload (SQLite-based)
             const projectPath = selectedProject.fullPath || selectedProject.path;
             const converted = await loadCursorSessionMessages(projectPath, selectedSession.id);
             setSessionMessages([]);
             setChatMessages(converted);
           } else {
-            // Reload Claude/Codex messages from API/JSONL
-            const messages = await loadSessionMessages(selectedProject.name, selectedSession.id, false, selectedSession.__provider || 'claude');
-            setSessionMessages(messages);
-            // convertedMessages will be automatically updated via useMemo
+            // Incremental update: only fetch messages after the current count
+            const currentCount = sessionMessages.length;
+            const response = await api.newSessionMessages(selectedProject.name, selectedSession.id, currentCount);
 
-            // Smart scroll behavior: only auto-scroll if user is near bottom
-            const shouldAutoScroll = autoScrollToBottom && isNearBottom();
-            if (shouldAutoScroll) {
-              setTimeout(() => scrollToBottom(), 200);
+            if (response.ok) {
+              const data = await response.json();
+              const newMessages = data.messages || [];
+
+              if (newMessages.length > 0) {
+                // Append new messages to existing list
+                setSessionMessages(prev => [...prev, ...newMessages]);
+                // convertedMessages will auto-update via useMemo, then chatMessages via useEffect
+
+                // Smart scroll: only auto-scroll if user is near bottom
+                const shouldAutoScroll = autoScrollToBottom && isNearBottom();
+                if (shouldAutoScroll) {
+                  setTimeout(() => scrollToBottom(), 200);
+                }
+              }
+              // If no new messages, nothing to do - user's view is unchanged
             }
-            // If user scrolled up, preserve their position (they're reading history)
           }
         } catch (error) {
-          console.error('Error reloading messages from external update:', error);
+          console.error('Error appending messages from external update:', error);
         }
       };
 
-      reloadExternalMessages();
+      appendNewMessages();
     }
-  }, [externalMessageUpdate, selectedSession, selectedProject, loadCursorSessionMessages, loadSessionMessages, isNearBottom, autoScrollToBottom, scrollToBottom]);
+  }, [externalMessageUpdate, selectedSession, selectedProject, loadCursorSessionMessages, sessionMessages.length, isNearBottom, autoScrollToBottom, scrollToBottom]);
 
   // When the user navigates to a specific session, clear any pending "new session" marker.
   useEffect(() => {
