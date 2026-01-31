@@ -440,9 +440,9 @@ function AppContent() {
 
   const handleSessionSelect = (session) => {
     setSelectedSession(session);
-    // Only switch to chat tab when user explicitly selects a session
-    // This prevents tab switching during automatic updates
-    if (activeTab !== 'git' && activeTab !== 'preview') {
+    // Only switch to chat tab from chat-related tabs
+    // Preserve terminal/files/git tabs when switching sessions
+    if (activeTab === 'chat' || activeTab === 'shell') {
       setActiveTab('chat');
     }
 
@@ -471,7 +471,9 @@ function AppContent() {
   const handleNewSession = (project) => {
     setSelectedProject(project);
     setSelectedSession(null);
-    setActiveTab('chat');
+    if (activeTab === 'chat' || activeTab === 'shell') {
+      setActiveTab('chat');
+    }
     navigate('/');
     if (isMobile) {
       setSidebarOpen(false);

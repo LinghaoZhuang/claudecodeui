@@ -1171,13 +1171,22 @@ function handleShellConnection(ws) {
                     console.log('🔧 Executing shell command:', shellCommand);
 
                     // Use appropriate shell based on platform
+                    // Use login shell (-l) to load user's environment (.bashrc, .profile, etc.)
                     const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
-                    const shellArgs = os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
+                    const shellArgs = os.platform() === 'win32' ? ['-Command', shellCommand] : ['-l', '-c', shellCommand];
 
                     // Use terminal dimensions from client if provided, otherwise use defaults
                     const termCols = data.cols || 80;
                     const termRows = data.rows || 24;
                     console.log('📐 Using terminal dimensions:', termCols, 'x', termRows);
+
+                    // Add common user bin paths to PATH for tools like claude
+                    const userBinPaths = [
+                        path.join(os.homedir(), '.local', 'bin'),
+                        path.join(os.homedir(), 'bin'),
+                        '/usr/local/bin'
+                    ].join(':');
+                    const enhancedPath = `${userBinPaths}:${process.env.PATH || ''}`;
 
                     shellProcess = pty.spawn(shell, shellArgs, {
                         name: 'xterm-256color',
@@ -1186,6 +1195,7 @@ function handleShellConnection(ws) {
                         cwd: os.homedir(),
                         env: {
                             ...process.env,
+                            PATH: enhancedPath,
                             TERM: 'xterm-256color',
                             COLORTERM: 'truecolor',
                             FORCE_COLOR: '3',
