@@ -405,10 +405,7 @@ function AppContent() {
         if (session) {
           setSelectedProject(project);
           setSelectedSession({ ...session, __provider: 'claude' });
-          // Only switch to chat tab if we're loading a different session
-          if (shouldSwitchTab) {
-            setActiveTab('chat');
-          }
+          // Keep current tab - don't force switch to chat
           return;
         }
         // Also check Cursor sessions
@@ -416,9 +413,7 @@ function AppContent() {
         if (cSession) {
           setSelectedProject(project);
           setSelectedSession({ ...cSession, __provider: 'cursor' });
-          if (shouldSwitchTab) {
-            setActiveTab('chat');
-          }
+          // Keep current tab - don't force switch to chat
           return;
         }
       }
@@ -440,11 +435,7 @@ function AppContent() {
 
   const handleSessionSelect = (session) => {
     setSelectedSession(session);
-    // Only switch to chat tab from chat-related tabs
-    // Preserve terminal/files/git tabs when switching sessions
-    if (activeTab === 'chat' || activeTab === 'shell') {
-      setActiveTab('chat');
-    }
+    // Keep current tab - don't force switch to chat
 
     // For Cursor sessions, we need to set the session ID differently
     // since they're persistent and not created by Claude
@@ -471,9 +462,7 @@ function AppContent() {
   const handleNewSession = (project) => {
     setSelectedProject(project);
     setSelectedSession(null);
-    if (activeTab === 'chat' || activeTab === 'shell') {
-      setActiveTab('chat');
-    }
+    // Keep current tab - don't force switch to chat
     navigate('/');
     if (isMobile) {
       setSidebarOpen(false);

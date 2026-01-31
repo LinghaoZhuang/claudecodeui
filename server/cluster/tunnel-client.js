@@ -56,6 +56,12 @@ class TunnelClient {
       // Build tunnel URL
       const tunnelUrl = this.masterUrl.replace(/\/?$/, '/cluster/tunnel');
 
+      // Security: Warn if not using secure WebSocket
+      if (tunnelUrl.startsWith('ws://') && !tunnelUrl.includes('localhost') && !tunnelUrl.includes('127.0.0.1')) {
+        console.warn('[TunnelClient] ⚠️  WARNING: Using insecure ws:// connection. Credentials may be exposed!');
+        console.warn('[TunnelClient] ⚠️  Use wss:// (MASTER_URL=wss://...) for production environments.');
+      }
+
       this.ws = new WebSocket(tunnelUrl);
 
       this.ws.on('open', () => {

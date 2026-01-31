@@ -26,6 +26,42 @@ class TunnelManager {
 
     // Request timeout (30 seconds)
     this.requestTimeout = options.requestTimeout || 30000;
+
+    // Dead connection detection settings
+    this.pingTimeout = options.pingTimeout || 90000; // 90 seconds without ping = dead
+    this.healthCheckInterval = options.healthCheckInterval || 30000; // Check every 30 seconds
+
+    // Start health check
+    this.startHealthCheck();
+  }
+
+  /**
+   * Start periodic health check for dead connections
+   */
+  startHealthCheck() {
+    this.healthCheckTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [slaveId, slave] of this.slaves.entries()) {
+        const lastPingTime = slave.lastPing ? slave.lastPing.getTime() : slave.connectedAt.getTime();
+        const timeSinceLastPing = now - lastPingTime;
+
+        if (timeSinceLastPing > this.pingTimeout) {
+          console.log(`[TunnelManager] Slave ${slaveId} ping timeout (${Math.round(timeSinceLastPing / 1000)}s), disconnecting`);
+          slave.ws.close(4005, 'Ping timeout');
+          // Note: The 'close' event handler will clean up the slave entry
+        }
+      }
+    }, this.healthCheckInterval);
+  }
+
+  /**
+   * Stop health check (for cleanup)
+   */
+  stopHealthCheck() {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
   }
 
   /**
@@ -399,7 +435,13 @@ class TunnelManager {
         }
       } else {
         // Tunnel not ready yet, buffer the message
-        console.log(`[TunnelManager] Buffering message for tunnel ${tunnelId} (not ready yet)`);
+        // Limit buffer size to prevent memory exhaustion
+        if (tunnel.buffer.length >= 100) {
+          console.warn(`[TunnelManager] Buffer overflow for tunnel ${tunnelId}, closing`);
+          localWs.close(1008, 'Buffer overflow');
+          this.tunnels.delete(tunnelId);
+          return;
+        }
         tunnel.buffer.push(dataStr);
       }
     });
