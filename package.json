@@ -48,7 +48,7 @@
   "author": "Claude Code UI Contributors",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.22",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.27",
     "@capacitor/android": "^8.0.2",
     "@capacitor/cli": "^8.0.2",
     "@capacitor/core": "^8.0.2",
