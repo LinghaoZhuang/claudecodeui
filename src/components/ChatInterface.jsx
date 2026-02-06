@@ -3545,7 +3545,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
 
       // Filter messages by session ID to prevent cross-session interference
       // Skip filtering for global messages that apply to all sessions
-      const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated', 'session-created'];
+      const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated', 'session-created', 'task-complete-notification'];
       const isGlobalMessage = globalMessageTypes.includes(latestMessage.type);
       const lifecycleMessageTypes = new Set([
         'claude-complete',
@@ -4146,8 +4146,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
           if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
             const n = new Notification('Claude 任务完成', {
               body: latestMessage.message || 'Claude Code 任务已完成',
-              icon: '/icon-192x192.png',
-              tag: 'claude-complete',
+              tag: 'claude-complete-' + Date.now(),
             });
             n.onclick = () => { window.focus(); n.close(); };
           }

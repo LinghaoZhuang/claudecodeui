@@ -356,12 +356,15 @@ app.post('/api/notify/task-complete', (req, res) => {
         message: message || 'Claude Code 任务已完成',
         source: source || 'unknown',
     });
+    let sent = 0;
     connectedClients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(notification);
+            sent++;
         }
     });
-    res.json({ ok: true });
+    console.log(`[Notify] Task-complete broadcast to ${sent}/${connectedClients.size} clients, source: ${source || 'unknown'}`);
+    res.json({ ok: true, clients: sent });
 });
 
 // System update endpoint
