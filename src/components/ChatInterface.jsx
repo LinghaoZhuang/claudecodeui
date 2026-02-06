@@ -1115,6 +1115,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
                 });
 
                 console.log(`[MessageCache] Loaded ${cachedMessages.length} messages from cache for session ${selectedSession.id}`);
+              } else {
+                // No cache — show loading indicator while fetching from server
+                setIsLoadingSessionMessages(true);
               }
 
               // Get last sync timestamp
@@ -1124,7 +1127,8 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
               }
             } catch (cacheError) {
               console.warn('[MessageCache] Error loading from cache:', cacheError);
-              // Continue with API fallback
+              // Cache failed — show loading indicator while fetching from server
+              setIsLoadingSessionMessages(true);
             }
 
             // STEP 2: Sync new messages from server in background
