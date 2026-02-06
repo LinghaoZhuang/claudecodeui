@@ -18,13 +18,12 @@
  * Handles both existing sessions (with real IDs) and new sessions (with temporary IDs).
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Settings as SettingsIcon, Sparkles } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
 import MobileNav from './components/MobileNav';
-import Settings from './components/Settings';
 import QuickSettingsPanel from './components/QuickSettingsPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { slideLeftVariants, backdropVariants } from './lib/animations';
@@ -44,6 +43,9 @@ import { api, authenticatedFetch } from './utils/api';
 import { ProjectRefreshProvider, useProjectRefresh } from './contexts/ProjectRefreshContext';
 import { I18nextProvider, useTranslation } from 'react-i18next';
 import i18n from './i18n/config.js';
+import composeProviders from './utils/composeProviders';
+
+const Settings = lazy(() => import('./components/Settings'));
 
 
 // ! Move to a separate file called AppContent.ts
@@ -177,6 +179,51 @@ function AppContent() {
     fetchProjects();
   }, [selectedClientId]);
 
+  // Shallow-equal check for flat objects (projects, sessions).
+  // Compares own enumerable string-keyed primitives; skips nested objects/arrays
+  // since those (sessions[], sessionMeta) are checked separately where needed.
+  const shallowEqual = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (const key of keysA) {
+      if (a[key] !== b[key]) return false;
+    }
+    return true;
+  };
+
+  // Compare sessions arrays by length + key scalar fields of each entry
+  const sessionsEqual = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].id !== b[i].id ||
+          a[i].title !== b[i].title ||
+          a[i].summary !== b[i].summary ||
+          a[i].updated_at !== b[i].updated_at ||
+          a[i].messageCount !== b[i].messageCount) return false;
+    }
+    return true;
+  };
+
+  // Check if projects data has changed using shallow field comparisons
+  const hasProjectsChanged = (prevProjects, newProjects) => {
+    if (prevProjects.length !== newProjects.length) return true;
+    return newProjects.some((newProject, index) => {
+      const prevProject = prevProjects[index];
+      if (!prevProject) return true;
+      return (
+        newProject.name !== prevProject.name ||
+        newProject.displayName !== prevProject.displayName ||
+        newProject.fullPath !== prevProject.fullPath ||
+        !shallowEqual(newProject.sessionMeta, prevProject.sessionMeta) ||
+        !sessionsEqual(newProject.sessions, prevProject.sessions)
+      );
+    });
+  };
+
   // Helper function to determine if an update is purely additive (new sessions/projects)
   // vs modifying existing selected items that would interfere with active conversations
   const isUpdateAdditive = (currentProjects, updatedProjects, selectedProject, selectedSession) => {
@@ -216,94 +263,20 @@ function AppContent() {
     return sessionUnchanged;
   };
 
-  // Handle WebSocket messages for real-time project updates
+  // Effect 1: Handle loading progress WebSocket messages
   useEffect(() => {
-    if (latestMessage) {
-      // Handle loading progress updates
-      if (latestMessage.type === 'loading_progress') {
-        if (loadingProgressTimeoutRef.current) {
-          clearTimeout(loadingProgressTimeoutRef.current);
-          loadingProgressTimeoutRef.current = null;
-        }
-        setLoadingProgress(latestMessage);
-        if (latestMessage.phase === 'complete') {
-          loadingProgressTimeoutRef.current = setTimeout(() => {
-            setLoadingProgress(null);
-            loadingProgressTimeoutRef.current = null;
-          }, 500);
-        }
-        return;
-      }
+    if (latestMessage?.type !== 'loading_progress') return;
 
-      if (latestMessage.type === 'projects_updated') {
-
-        // External Session Update Detection: Check if the changed file is the current session's JSONL
-        // If so, and the session is not active, trigger a message reload in ChatInterface
-        if (latestMessage.changedFile && selectedSession && selectedProject) {
-          // Extract session ID from changedFile (format: "project-name/session-id.jsonl")
-          const normalized = latestMessage.changedFile.replace(/\\/g, '/');
-          const changedFileParts = normalized.split('/');
-
-          if (changedFileParts.length >= 2) {
-            const filename = changedFileParts[changedFileParts.length - 1];
-            const changedSessionId = filename.replace('.jsonl', '');
-
-            // Check if this is the currently-selected session
-            if (changedSessionId === selectedSession.id) {
-              const isSessionActive = activeSessions.has(selectedSession.id);
-
-              if (!isSessionActive) {
-                // Session is not active - safe to reload messages
-                triggerExternalUpdate();
-              }
-            }
-          }
-        }
-
-        // Session Protection Logic: Allow additions but prevent changes during active conversations
-        // This allows new sessions/projects to appear in sidebar while protecting active chat messages
-        if (hasActiveSession(selectedSession?.id)) {
-          // Allow updates but be selective: permit additions, prevent changes to existing items
-          const updatedProjects = latestMessage.projects;
-          const currentProjects = projects;
-          
-          // Check if this is purely additive (new sessions/projects) vs modification of existing ones
-          const isAdditiveUpdate = isUpdateAdditive(currentProjects, updatedProjects, selectedProject, selectedSession);
-          
-          if (!isAdditiveUpdate) {
-            // Skip updates that would modify existing selected session/project
-            return;
-          }
-          // Continue with additive updates below
-        }
-        
-        // Update projects state with the new data from WebSocket
-        const updatedProjects = latestMessage.projects;
-        setProjects(updatedProjects);
-
-        // Update selected project if it exists in the updated projects
-        if (selectedProject) {
-          const updatedSelectedProject = updatedProjects.find(p => p.name === selectedProject.name);
-          if (updatedSelectedProject) {
-            // Only update selected project if it actually changed - prevents flickering
-            if (JSON.stringify(updatedSelectedProject) !== JSON.stringify(selectedProject)) {
-              setSelectedProject(updatedSelectedProject);
-            }
-
-            if (selectedSession) {
-              const allSessions = [
-                ...(updatedSelectedProject.sessions || []),
-                ...(updatedSelectedProject.codexSessions || []),
-                ...(updatedSelectedProject.cursorSessions || [])
-              ];
-              const updatedSelectedSession = allSessions.find(s => s.id === selectedSession.id);
-              if (!updatedSelectedSession) {
-                setSelectedSession(null);
-              }
-            }
-          }
-        }
-      }
+    if (loadingProgressTimeoutRef.current) {
+      clearTimeout(loadingProgressTimeoutRef.current);
+      loadingProgressTimeoutRef.current = null;
+    }
+    setLoadingProgress(latestMessage);
+    if (latestMessage.phase === 'complete') {
+      loadingProgressTimeoutRef.current = setTimeout(() => {
+        setLoadingProgress(null);
+        loadingProgressTimeoutRef.current = null;
+      }, 500);
     }
 
     return () => {
@@ -312,6 +285,75 @@ function AppContent() {
         loadingProgressTimeoutRef.current = null;
       }
     };
+  }, [latestMessage]);
+
+  // Effect 2: Detect external session file changes and trigger message reload
+  useEffect(() => {
+    if (latestMessage?.type !== 'projects_updated' || !latestMessage.changedFile) return;
+    if (!selectedSession || !selectedProject) return;
+
+    // Extract session ID from changedFile (format: "project-name/session-id.jsonl")
+    const normalized = latestMessage.changedFile.replace(/\\/g, '/');
+    const changedFileParts = normalized.split('/');
+
+    if (changedFileParts.length >= 2) {
+      const filename = changedFileParts[changedFileParts.length - 1];
+      const changedSessionId = filename.replace('.jsonl', '');
+
+      // Check if this is the currently-selected session
+      if (changedSessionId === selectedSession.id) {
+        const isSessionActive = activeSessions.has(selectedSession.id);
+
+        if (!isSessionActive) {
+          // Session is not active - safe to reload messages
+          triggerExternalUpdate();
+        }
+      }
+    }
+  }, [latestMessage, selectedSession, selectedProject, activeSessions, triggerExternalUpdate]);
+
+  // Effect 3: Update project state from WebSocket with session protection
+  useEffect(() => {
+    if (latestMessage?.type !== 'projects_updated') return;
+
+    // Session Protection Logic: Allow additions but prevent changes during active conversations
+    if (hasActiveSession(selectedSession?.id)) {
+      const updatedProjects = latestMessage.projects;
+      const currentProjects = projects;
+
+      const isAdditiveUpdate = isUpdateAdditive(currentProjects, updatedProjects, selectedProject, selectedSession);
+
+      if (!isAdditiveUpdate) {
+        return;
+      }
+    }
+
+    // Update projects state with the new data from WebSocket
+    const updatedProjects = latestMessage.projects;
+    setProjects(updatedProjects);
+
+    // Update selected project if it exists in the updated projects
+    if (selectedProject) {
+      const updatedSelectedProject = updatedProjects.find(p => p.name === selectedProject.name);
+      if (updatedSelectedProject) {
+        // Only update selected project if it actually changed - prevents flickering
+        if (!shallowEqual(updatedSelectedProject, selectedProject)) {
+          setSelectedProject(updatedSelectedProject);
+        }
+
+        if (selectedSession) {
+          const allSessions = [
+            ...(updatedSelectedProject.sessions || []),
+            ...(updatedSelectedProject.codexSessions || []),
+            ...(updatedSelectedProject.cursorSessions || [])
+          ];
+          const updatedSelectedSession = allSessions.find(s => s.id === selectedSession.id);
+          if (!updatedSelectedSession) {
+            setSelectedSession(null);
+          }
+        }
+      }
+    }
   }, [latestMessage, selectedProject, selectedSession, activeSessions]);
 
   const fetchProjects = async () => {
@@ -340,19 +382,7 @@ function AppContent() {
         }
 
         // Check if the projects data has actually changed
-        const hasChanges = data.some((newProject, index) => {
-          const prevProject = prevProjects[index];
-          if (!prevProject) return true;
-
-          // Compare key properties that would affect UI
-          return (
-            newProject.name !== prevProject.name ||
-            newProject.displayName !== prevProject.displayName ||
-            newProject.fullPath !== prevProject.fullPath ||
-            JSON.stringify(newProject.sessionMeta) !== JSON.stringify(prevProject.sessionMeta) ||
-            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions)
-          );
-        }) || data.length !== prevProjects.length;
+        const hasChanges = hasProjectsChanged(prevProjects, data);
 
         // Only update if there are actual changes
         if (hasChanges) {
@@ -482,35 +512,24 @@ function AppContent() {
       // Optimize to preserve object references and minimize re-renders
       setProjects(prevProjects => {
         // Check if projects data has actually changed
-        const hasChanges = freshProjects.some((newProject, index) => {
-          const prevProject = prevProjects[index];
-          if (!prevProject) return true;
-          
-          return (
-            newProject.name !== prevProject.name ||
-            newProject.displayName !== prevProject.displayName ||
-            newProject.fullPath !== prevProject.fullPath ||
-            JSON.stringify(newProject.sessionMeta) !== JSON.stringify(prevProject.sessionMeta) ||
-            JSON.stringify(newProject.sessions) !== JSON.stringify(prevProject.sessions)
-          );
-        }) || freshProjects.length !== prevProjects.length;
-        
+        const hasChanges = hasProjectsChanged(prevProjects, freshProjects);
+
         return hasChanges ? freshProjects : prevProjects;
       });
-      
+
       // If we have a selected project, make sure it's still selected after refresh
       if (selectedProject) {
         const refreshedProject = freshProjects.find(p => p.name === selectedProject.name);
         if (refreshedProject) {
           // Only update selected project if it actually changed
-          if (JSON.stringify(refreshedProject) !== JSON.stringify(selectedProject)) {
+          if (!shallowEqual(refreshedProject, selectedProject)) {
             setSelectedProject(refreshedProject);
           }
-          
+
           // If we have a selected session, try to find it in the refreshed project
           if (selectedSession) {
             const refreshedSession = refreshedProject.sessions?.find(s => s.id === selectedSession.id);
-            if (refreshedSession && JSON.stringify(refreshedSession) !== JSON.stringify(selectedSession)) {
+            if (refreshedSession && !shallowEqual(refreshedSession, selectedSession)) {
               setSelectedSession(refreshedSession);
             }
           }
@@ -909,12 +928,16 @@ function AppContent() {
       )}
 
       {/* Settings Modal */}
-      <Settings
-        isOpen={showSettings}
-        onClose={closeSettings}
-        projects={projects}
-        initialTab={settingsInitialTab}
-      />
+      {showSettings && (
+        <Suspense fallback={null}>
+          <Settings
+            isOpen={showSettings}
+            onClose={closeSettings}
+            projects={projects}
+            initialTab={settingsInitialTab}
+          />
+        </Suspense>
+      )}
 
       {/* Version Upgrade Modal */}
       <VersionUpgradeModal />
@@ -922,37 +945,33 @@ function AppContent() {
   );
 }
 
+// Compose all providers into a single flat wrapper
+const Providers = composeProviders(
+  [I18nextProvider, { i18n }],
+  [ThemeProvider],
+  [AuthProvider],
+  [WebSocketProvider],
+  [ClusterProvider],
+  [TasksSettingsProvider],
+  [ChatSettingsProvider],
+  [SessionProtectionProvider],
+  [ProjectRefreshProvider],
+  [TaskMasterProvider],
+);
+
 // Root App component with router
 function App() {
   return (
-    <I18nextProvider i18n={i18n}>
-      <ThemeProvider>
-        <AuthProvider>
-          <WebSocketProvider>
-            <ClusterProvider>
-              <TasksSettingsProvider>
-                <ChatSettingsProvider>
-                  <SessionProtectionProvider>
-                    <ProjectRefreshProvider>
-                    <TaskMasterProvider>
-                    <ProtectedRoute>
-                      <Router basename={window.__ROUTER_BASENAME__ || ''}>
-                        <Routes>
-                          <Route path="/" element={<AppContent />} />
-                          <Route path="/session/:sessionId" element={<AppContent />} />
-                        </Routes>
-                      </Router>
-                    </ProtectedRoute>
-                  </TaskMasterProvider>
-                  </ProjectRefreshProvider>
-                  </SessionProtectionProvider>
-                </ChatSettingsProvider>
-              </TasksSettingsProvider>
-            </ClusterProvider>
-          </WebSocketProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </I18nextProvider>
+    <Providers>
+      <ProtectedRoute>
+        <Router basename={window.__ROUTER_BASENAME__ || ''}>
+          <Routes>
+            <Route path="/" element={<AppContent />} />
+            <Route path="/session/:sessionId" element={<AppContent />} />
+          </Routes>
+        </Router>
+      </ProtectedRoute>
+    </Providers>
   );
 }
 

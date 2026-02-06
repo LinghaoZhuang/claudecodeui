@@ -5,25 +5,34 @@
  * and renders the appropriate view based on the active tab.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import ChatInterface from './ChatInterface';
-import FileTree from './FileTree';
-import CodeEditor from './CodeEditor';
-import StandaloneShell from './StandaloneShell';
-import GitPanel from './GitPanel';
 import ErrorBoundary from './ErrorBoundary';
 import ClaudeLogo from './ClaudeLogo';
 import CursorLogo from './CursorLogo';
-import TaskList from './TaskList';
-import TaskDetail from './TaskDetail';
-import PRDEditor from './PRDEditor';
 import Tooltip from './Tooltip';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
 import { useCluster } from '../contexts/ClusterContext';
 import { useChatSettings } from '../contexts/ChatSettingsContext';
 import { api } from '../utils/api';
+
+const ChatInterface = lazy(() => import('./ChatInterface'));
+const StandaloneShell = lazy(() => import('./StandaloneShell'));
+const FileTree = lazy(() => import('./FileTree'));
+const GitPanel = lazy(() => import('./GitPanel'));
+const TaskList = lazy(() => import('./TaskList'));
+const TaskDetail = lazy(() => import('./TaskDetail'));
+const PRDEditor = lazy(() => import('./PRDEditor'));
+const CodeEditor = lazy(() => import('./CodeEditor'));
+
+function TabLoadingSpinner() {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <div className="w-8 h-8 rounded-full border-4 border-gray-200 border-t-blue-500 animate-spin" />
+    </div>
+  );
+}
 
 function MainContent({
   selectedProject,
@@ -532,24 +541,29 @@ function MainContent({
         <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${editingFile ? 'mr-0' : ''} ${editorExpanded ? 'hidden' : ''}`}>
           <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
             <ErrorBoundary showDetails={true}>
-              <ChatInterface
-              selectedProject={selectedProject}
-              selectedSession={selectedSession}
-              ws={ws}
-              sendMessage={sendMessage}
-              latestMessage={latestMessage}
-              onFileOpen={handleFileOpen}
-              onInputFocusChange={onInputFocusChange}
-              onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
-            />
+              <Suspense fallback={<TabLoadingSpinner />}>
+                <ChatInterface
+                selectedProject={selectedProject}
+                selectedSession={selectedSession}
+                ws={ws}
+                sendMessage={sendMessage}
+                latestMessage={latestMessage}
+                onFileOpen={handleFileOpen}
+                onInputFocusChange={onInputFocusChange}
+                onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
+              />
+              </Suspense>
           </ErrorBoundary>
         </div>
         {activeTab === 'files' && (
           <div className="h-full overflow-hidden">
-            <FileTree selectedProject={selectedProject} />
+            <Suspense fallback={<TabLoadingSpinner />}>
+              <FileTree selectedProject={selectedProject} />
+            </Suspense>
           </div>
         )}
         {/* Render AI shell instances for each opened session (current client) */}
+        <Suspense fallback={<TabLoadingSpinner />}>
         {(openedSessionsByClient[selectedClientId || 'local'] || []).map(({ session, project }) => {
           const isActive = activeTab === 'shell' && selectedSession?.id === session.id;
           return (
@@ -587,13 +601,17 @@ function MainContent({
             </div>
           );
         })}
+        </Suspense>
         {activeTab === 'git' && (
           <div className="h-full overflow-hidden">
-            <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
+            <Suspense fallback={<TabLoadingSpinner />}>
+              <GitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
+            </Suspense>
           </div>
         )}
         {shouldShowTasksTab && (
           <div className={`h-full ${activeTab === 'tasks' ? 'block' : 'hidden'}`}>
+            <Suspense fallback={<TabLoadingSpinner />}>
             <div className="h-full flex flex-col overflow-hidden">
               <TaskList
                 tasks={tasks || []}
@@ -624,6 +642,7 @@ function MainContent({
                 }}
               />
             </div>
+            </Suspense>
           </div>
         )}
         <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`}>
@@ -675,15 +694,17 @@ function MainContent({
               className={`flex-shrink-0 border-l border-gray-200 dark:border-gray-700 h-full overflow-hidden ${editorExpanded ? 'flex-1' : ''}`}
               style={editorExpanded ? {} : { width: `${editorWidth}px` }}
             >
-              <CodeEditor
-                file={editingFile}
-                onClose={handleCloseEditor}
-                projectPath={selectedProject?.path}
-                isSidebar={true}
-                isExpanded={editorExpanded}
-                onToggleExpand={handleToggleEditorExpand}
-                onOpenSettings={openSettings}
-              />
+              <Suspense fallback={<TabLoadingSpinner />}>
+                <CodeEditor
+                  file={editingFile}
+                  onClose={handleCloseEditor}
+                  projectPath={selectedProject?.path}
+                  isSidebar={true}
+                  isExpanded={editorExpanded}
+                  onToggleExpand={handleToggleEditorExpand}
+                  onOpenSettings={openSettings}
+                />
+              </Suspense>
             </div>
           </>
         )}
@@ -691,27 +712,32 @@ function MainContent({
 
       {/* Code Editor Modal for Mobile */}
       {editingFile && isMobile && (
-        <CodeEditor
-          file={editingFile}
-          onClose={handleCloseEditor}
-          projectPath={selectedProject?.path}
-          isSidebar={false}
-          onOpenSettings={openSettings}
-        />
+        <Suspense fallback={null}>
+          <CodeEditor
+            file={editingFile}
+            onClose={handleCloseEditor}
+            projectPath={selectedProject?.path}
+            isSidebar={false}
+            onOpenSettings={openSettings}
+          />
+        </Suspense>
       )}
 
       {/* Task Detail Modal */}
       {shouldShowTasksTab && showTaskDetail && selectedTask && (
-        <TaskDetail
+        <Suspense fallback={null}>
+          <TaskDetail
           task={selectedTask}
           isOpen={showTaskDetail}
           onClose={handleTaskDetailClose}
           onStatusChange={handleTaskStatusChange}
           onTaskClick={handleTaskClick}
         />
+        </Suspense>
       )}
       {/* PRD Editor Modal */}
       {showPRDEditor && (
+        <Suspense fallback={null}>
         <PRDEditor
           project={currentProject}
           projectPath={currentProject?.fullPath || currentProject?.path}
@@ -744,6 +770,7 @@ function MainContent({
             refreshTasks?.();
           }}
         />
+        </Suspense>
       )}
       {/* PRD Notification */}
       {prdNotification && (

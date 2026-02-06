@@ -9,6 +9,18 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Global error handlers — prevent silent crashes from unhandled async errors
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection]', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+  // Give the process a moment to flush logs, then exit
+  // (continuing after uncaughtException is unsafe — state may be corrupted)
+  setTimeout(() => process.exit(1), 1000);
+});
+
 // ANSI color codes for terminal output
 const colors = {
     reset: '\x1b[0m',

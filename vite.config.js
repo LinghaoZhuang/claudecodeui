@@ -24,11 +24,19 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       outDir: 'dist',
-      chunkSizeWarningLimit: 1000,
+      chunkSizeWarningLimit: 500,
       rollupOptions: {
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            'vendor-markdown': [
+              'react-markdown',
+              'remark-gfm',
+              'remark-math',
+              'rehype-katex',
+              'katex',
+            ],
+            'vendor-framer': ['framer-motion'],
             'vendor-codemirror': [
               '@uiw/react-codemirror',
               '@codemirror/lang-css',
