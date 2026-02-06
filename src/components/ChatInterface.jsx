@@ -889,6 +889,8 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
     return scrollHeight - scrollTop - clientHeight < 50;
   }, []);
 
+  const INITIAL_CACHE_LIMIT = 50;
+
   const loadOlderMessages = useCallback(async (container) => {
     if (!container || isLoadingMoreRef.current || isLoadingMoreMessages) return false;
     if (!hasMoreMessages || !selectedSession || !selectedProject) return false;
@@ -901,12 +903,43 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
     const previousScrollTop = container.scrollTop;
 
     try {
-      const moreMessages = await loadSessionMessages(
-        selectedProject.name,
-        selectedSession.id,
-        true,
-        sessionProvider
-      );
+      let moreMessages = [];
+
+      // For Claude: try loading older messages from IndexedDB cache first
+      if (sessionProvider === 'claude') {
+        try {
+          await messageCache.init();
+          const allCached = await messageCache.getMessages(selectedSession.id);
+          const currentCount = sessionMessages.length;
+          const remainingCount = allCached.length - currentCount;
+
+          if (remainingCount > 0) {
+            // Load the next batch from cache (earlier messages)
+            const startIdx = Math.max(0, allCached.length - currentCount - INITIAL_CACHE_LIMIT);
+            const endIdx = allCached.length - currentCount;
+            const olderRecords = allCached.slice(startIdx, endIdx);
+            moreMessages = olderRecords.map(r => r.rawData);
+
+            // Update hasMoreMessages
+            setHasMoreMessages(startIdx > 0);
+          } else {
+            setHasMoreMessages(false);
+          }
+        } catch (cacheError) {
+          console.warn('[MessageCache] Error loading older from cache, falling back to API:', cacheError);
+          // Fall through to API-based loading below
+        }
+      }
+
+      // Fallback: load from API (also used by codex)
+      if (moreMessages.length === 0) {
+        moreMessages = await loadSessionMessages(
+          selectedProject.name,
+          selectedSession.id,
+          true,
+          sessionProvider
+        );
+      }
 
       if (moreMessages.length > 0) {
         pendingScrollRestoreRef.current = {
@@ -923,7 +956,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
     } finally {
       isLoadingMoreRef.current = false;
     }
-  }, [hasMoreMessages, isLoadingMoreMessages, selectedSession, selectedProject, loadSessionMessages]);
+  }, [hasMoreMessages, isLoadingMoreMessages, selectedSession, selectedProject, sessionMessages, loadSessionMessages]);
 
   // Handle scroll events to detect when user manually scrolls up and load more messages
   const handleScroll = useCallback(async () => {
@@ -1084,19 +1117,25 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
           // Only load messages from API if this is a user-initiated session change
           // For system-initiated changes, preserve existing messages and rely on WebSocket
           if (!isSystemSessionChange) {
-            // STEP 1: Try to load from IndexedDB cache (instant display)
+            // STEP 1: Try to load from IndexedDB cache (instant display, last 50 only)
             let cachedMessages = [];
+            let totalCachedCount = 0;
             let lastSyncTimestamp = 0;
 
             try {
               // Initialize cache if needed
               await messageCache.init();
 
-              // Load cached messages
-              const cachedRecords = await messageCache.getMessages(selectedSession.id);
-              if (cachedRecords.length > 0) {
-                // Convert cached rawData back to messages
-                cachedMessages = cachedRecords.map(r => r.rawData);
+              // Get total count first to know if there are more
+              const allCachedRecords = await messageCache.getMessages(selectedSession.id);
+              totalCachedCount = allCachedRecords.length;
+
+              if (totalCachedCount > 0) {
+                // Only take the last INITIAL_CACHE_LIMIT for fast display
+                const displayRecords = totalCachedCount > INITIAL_CACHE_LIMIT
+                  ? allCachedRecords.slice(-INITIAL_CACHE_LIMIT)
+                  : allCachedRecords;
+                cachedMessages = displayRecords.map(r => r.rawData);
                 const converted = convertSessionMessages(cachedMessages);
 
                 // Race condition check
@@ -1106,6 +1145,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
                 setSessionMessages(cachedMessages);
                 setChatMessages(converted);
                 setIsLoadingSessionMessages(false);
+                setTotalMessages(totalCachedCount);
+                setHasMoreMessages(totalCachedCount > INITIAL_CACHE_LIMIT);
+                setMessagesOffset(cachedMessages.length);
 
                 // Scroll to bottom after cache display - use requestAnimationFrame for proper timing
                 requestAnimationFrame(() => {
@@ -1114,7 +1156,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
                   });
                 });
 
-                console.log(`[MessageCache] Loaded ${cachedMessages.length} messages from cache for session ${selectedSession.id}`);
+                console.log(`[MessageCache] Loaded ${cachedMessages.length}/${totalCachedCount} messages from cache for session ${selectedSession.id}`);
               } else {
                 // No cache — show loading indicator while fetching from server
                 setIsLoadingSessionMessages(true);
@@ -1154,17 +1196,24 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
                     syncData.total
                   );
 
-                  // Convert and append new messages
-                  const newConverted = convertSessionMessages(newMessages);
-
                   if (cachedMessages.length > 0) {
-                    // Append to existing cached messages
+                    // Had cached display — only append genuinely new messages
+                    const newConverted = convertSessionMessages(newMessages);
                     setSessionMessages(prev => [...prev, ...newMessages]);
                     setChatMessages(prev => [...prev, ...newConverted]);
+                    setTotalMessages(totalCachedCount + newMessages.length);
                   } else {
-                    // No cache, set all messages
-                    setSessionMessages(newMessages);
-                    setChatMessages(newConverted);
+                    // No cache — show last INITIAL_CACHE_LIMIT of all messages
+                    const allMessages = newMessages;
+                    const displayMessages = allMessages.length > INITIAL_CACHE_LIMIT
+                      ? allMessages.slice(-INITIAL_CACHE_LIMIT)
+                      : allMessages;
+                    const converted = convertSessionMessages(displayMessages);
+                    setSessionMessages(displayMessages);
+                    setChatMessages(converted);
+                    setTotalMessages(allMessages.length);
+                    setHasMoreMessages(allMessages.length > INITIAL_CACHE_LIMIT);
+                    setMessagesOffset(displayMessages.length);
                   }
 
                   // Update pagination state
