@@ -105,7 +105,6 @@ function broadcastProgress(progress) {
         type: 'loading_progress',
         ...progress
     }));
-    });
 }
 
 // Setup file system watcher for Claude projects folder using chokidar
