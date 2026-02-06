@@ -1392,11 +1392,23 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
     }
   }, [input, selectedProject]);
 
-  // Persist chat messages to localStorage
+  // Persist chat messages to localStorage (debounced — only as sync fallback for initial load)
+  const chatMessagesSaveTimerRef = useRef(null);
   useEffect(() => {
     if (selectedProject && chatMessages.length > 0) {
-      safeLocalStorage.setItem(`chat_messages_${selectedProject.name}`, JSON.stringify(chatMessages));
+      if (chatMessagesSaveTimerRef.current) {
+        clearTimeout(chatMessagesSaveTimerRef.current);
+      }
+      chatMessagesSaveTimerRef.current = setTimeout(() => {
+        safeLocalStorage.setItem(`chat_messages_${selectedProject.name}`, JSON.stringify(chatMessages));
+        chatMessagesSaveTimerRef.current = null;
+      }, 2000);
     }
+    return () => {
+      if (chatMessagesSaveTimerRef.current) {
+        clearTimeout(chatMessagesSaveTimerRef.current);
+      }
+    };
   }, [chatMessages, selectedProject]);
 
   // Load saved state when project changes (but don't interfere with session loading)
