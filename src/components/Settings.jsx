@@ -20,6 +20,8 @@ import AccountContent from './settings/AccountContent';
 import PermissionsContent from './settings/PermissionsContent';
 import McpServersContent from './settings/McpServersContent';
 import LanguageSelector from './LanguageSelector';
+import { motion, AnimatePresence } from 'framer-motion';
+import { scaleVariants, backdropVariants } from '../lib/animations';
 
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const { isDarkMode, toggleDarkMode } = useTheme();
@@ -941,11 +943,24 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-backdrop fixed inset-0 flex items-center justify-center z-[9999] md:p-4 bg-background/95">
-      <div className="bg-background border border-border md:rounded-lg shadow-xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col">
+    <AnimatePresence>
+    {isOpen && (
+    <motion.div
+      className="modal-backdrop fixed inset-0 flex items-center justify-center z-[9999] md:p-4"
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+    >
+      <div className="absolute inset-0 bg-background/95" />
+      <motion.div
+        className="relative bg-background border border-border md:rounded-lg shadow-xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col"
+        variants={scaleVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
         <div className="flex items-center justify-between p-4 md:p-6 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-3">
             <SettingsIcon className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
@@ -1956,7 +1971,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
             </Button>
           </div>
         </div>
-      </div>
 
       {/* Login Modal */}
       <LoginModal
@@ -1973,7 +1987,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           false
         }
       />
-    </div>
+    </motion.div>
+    </motion.div>
+    )}
+    </AnimatePresence>
   );
 }
 

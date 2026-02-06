@@ -26,6 +26,8 @@ import MainContent from './components/MainContent';
 import MobileNav from './components/MobileNav';
 import Settings from './components/Settings';
 import QuickSettingsPanel from './components/QuickSettingsPanel';
+import { motion, AnimatePresence } from 'framer-motion';
+import { slideLeftVariants, backdropVariants } from './lib/animations';
 
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -818,9 +820,10 @@ function AppContent() {
       {/* Fixed Desktop Sidebar */}
       {!isMobile && (
         <div
-          className={`h-full flex-shrink-0 border-r border-border bg-card transition-all duration-300 ${
+          className={`h-full flex-shrink-0 border-r border-border bg-card ${
             sidebarVisible ? 'w-80' : 'w-14'
           }`}
+          style={{ transition: 'width 300ms cubic-bezier(0.4, 0, 0.2, 1)' }}
         >
           <div className="h-full overflow-hidden">
             {sidebarVisible ? (
@@ -896,53 +899,61 @@ function AppContent() {
 
       {/* Mobile Sidebar Overlay */}
       {isMobile && (
-        <div className={`fixed inset-0 z-50 flex transition-all duration-150 ease-out ${
-          sidebarOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
-        }`}>
-          <button
-            className="fixed inset-0 bg-background/80 backdrop-blur-sm transition-opacity duration-150 ease-out"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSidebarOpen(false);
-            }}
-            onTouchStart={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setSidebarOpen(false);
-            }}
-            aria-label={t('versionUpdate.ariaLabels.closeSidebar')}
-          />
-          <div
-            className={`relative w-[85vw] max-w-sm sm:w-80 h-full bg-card border-r border-border transform transition-transform duration-150 ease-out ${
-              sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-            }`}
-            onClick={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-          >
-            <Sidebar
-              projects={projects}
-              selectedProject={selectedProject}
-              selectedSession={selectedSession}
-              onProjectSelect={handleProjectSelect}
-              onSessionSelect={handleSessionSelect}
-              onNewSession={handleNewSession}
-              onSessionDelete={handleSessionDelete}
-              onProjectDelete={handleProjectDelete}
-              isLoading={isLoadingProjects}
-              loadingProgress={loadingProgress}
-              onRefresh={handleSidebarRefresh}
-              onShowSettings={() => setShowSettings(true)}
-              updateAvailable={updateAvailable}
-              latestVersion={latestVersion}
-              currentVersion={currentVersion}
-              releaseInfo={releaseInfo}
-              onShowVersionModal={() => setShowVersionModal(true)}
-              isPWA={isPWA}
-              isMobile={isMobile}
-              onToggleSidebar={() => setSidebarVisible(false)}
+        <AnimatePresence>
+        {sidebarOpen && (
+          <div className="fixed inset-0 z-50 flex">
+            <motion.button
+              className="fixed inset-0 bg-background/80 backdrop-blur-sm"
+              variants={backdropVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSidebarOpen(false);
+              }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSidebarOpen(false);
+              }}
+              aria-label={t('versionUpdate.ariaLabels.closeSidebar')}
             />
+            <motion.div
+              className="relative w-[85vw] max-w-sm sm:w-80 h-full bg-card border-r border-border"
+              variants={slideLeftVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+            >
+              <Sidebar
+                projects={projects}
+                selectedProject={selectedProject}
+                selectedSession={selectedSession}
+                onProjectSelect={handleProjectSelect}
+                onSessionSelect={handleSessionSelect}
+                onNewSession={handleNewSession}
+                onSessionDelete={handleSessionDelete}
+                onProjectDelete={handleProjectDelete}
+                isLoading={isLoadingProjects}
+                loadingProgress={loadingProgress}
+                onRefresh={handleSidebarRefresh}
+                onShowSettings={() => setShowSettings(true)}
+                updateAvailable={updateAvailable}
+                latestVersion={latestVersion}
+                currentVersion={currentVersion}
+                releaseInfo={releaseInfo}
+                onShowVersionModal={() => setShowVersionModal(true)}
+                isPWA={isPWA}
+                isMobile={isMobile}
+                onToggleSidebar={() => setSidebarVisible(false)}
+              />
+            </motion.div>
           </div>
-        </div>
+        )}
+        </AnimatePresence>
       )}
 
       {/* Main Content Area - Flexible */}

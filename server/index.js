@@ -852,8 +852,32 @@ app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) 
     }
 });
 
+// WebSocket heartbeat - detect and close dead connections
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+
+function setupHeartbeat(ws) {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+}
+
+const heartbeatTimer = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            console.log('[INFO] Terminating dead WebSocket connection');
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, HEARTBEAT_INTERVAL);
+
+wss.on('close', () => {
+    clearInterval(heartbeatTimer);
+});
+
 // WebSocket connection handler that routes based on URL path
 wss.on('connection', (ws, request) => {
+    setupHeartbeat(ws);
     const url = request.url;
     console.log('[INFO] Client connected to:', url);
 
@@ -1436,8 +1460,8 @@ function handleShellConnection(ws) {
                     console.warn('No active shell process to send input to');
                 }
             } else if (data.type === 'resize') {
-                // Handle terminal resize
-                if (shellProcess && shellProcess.resize) {
+                // Handle terminal resize - reject unreasonable dimensions
+                if (shellProcess && shellProcess.resize && data.cols > 10 && data.rows > 2) {
                     console.log('Terminal resize requested:', data.cols, 'x', data.rows);
                     shellProcess.resize(data.cols, data.rows);
                 }

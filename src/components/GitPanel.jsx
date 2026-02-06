@@ -3,6 +3,8 @@ import { GitBranch, GitCommit, Plus, Minus, RefreshCw, Check, X, ChevronDown, Ch
 import { MicButton } from './MicButton.jsx';
 import { authenticatedFetch } from '../utils/api';
 import DiffViewer from './DiffViewer.jsx';
+import { motion, AnimatePresence } from 'framer-motion';
+import { accordionVariants, scaleVariants, backdropVariants } from '../lib/animations';
 
 function GitPanel({ selectedProject, isMobile, onFileOpen }) {
   const [gitStatus, setGitStatus] = useState(null);
@@ -744,11 +746,15 @@ function GitPanel({ selectedProject, isMobile, onFileOpen }) {
             </div>
           </div>
         </div>
-        <div className={`bg-gray-50 dark:bg-gray-900 transition-all duration-400 ease-in-out overflow-hidden ${
-          isExpanded && diff 
-            ? 'max-h-[600px] opacity-100 translate-y-0' 
-            : 'max-h-0 opacity-0 -translate-y-1'
-        }`}>
+        <AnimatePresence>
+        {isExpanded && diff && (
+          <motion.div
+            className="bg-gray-50 dark:bg-gray-900 overflow-hidden"
+            variants={accordionVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
             {/* Operation header */}
             <div className="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2">
@@ -782,7 +788,9 @@ function GitPanel({ selectedProject, isMobile, onFileOpen }) {
             <div className="max-h-96 overflow-y-auto">
               {diff && <DiffViewer diff={diff} fileName={filePath} isMobile={isMobile} wrapText={wrapText} />}
             </div>
-        </div>
+          </motion.div>
+        )}
+        </AnimatePresence>
       </div>
     );
   };
@@ -1251,10 +1259,24 @@ function GitPanel({ selectedProject, isMobile, onFileOpen }) {
       )}
 
       {/* New Branch Modal */}
+      <AnimatePresence>
       {showNewBranchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setShowNewBranchModal(false)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50"
+            variants={backdropVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            onClick={() => setShowNewBranchModal(false)}
+          />
+          <motion.div
+            className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full"
+            variants={scaleVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
             <div className="p-6">
               <h3 className="text-lg font-semibold mb-4">Create New Branch</h3>
               <div className="mb-4">
@@ -1307,15 +1329,30 @@ function GitPanel({ selectedProject, isMobile, onFileOpen }) {
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+      </AnimatePresence>
 
       {/* Confirmation Modal */}
+      <AnimatePresence>
       {confirmAction && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setConfirmAction(null)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50"
+            variants={backdropVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            onClick={() => setConfirmAction(null)}
+          />
+          <motion.div
+            className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full"
+            variants={scaleVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
             <div className="p-6">
               <div className="flex items-center mb-4">
                 <div className={`p-2 rounded-full mr-3 ${
@@ -1393,9 +1430,10 @@ function GitPanel({ selectedProject, isMobile, onFileOpen }) {
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

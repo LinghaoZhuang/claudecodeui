@@ -1,5 +1,7 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { useTheme } from '../contexts/ThemeContext';
+import { springSnappy } from '../lib/animations';
 
 function DarkModeToggle() {
   const { isDarkMode, toggleDarkMode } = useTheme();
@@ -13,10 +15,10 @@ function DarkModeToggle() {
       aria-label="Toggle dark mode"
     >
       <span className="sr-only">Toggle dark mode</span>
-      <span
-        className={`${
-          isDarkMode ? 'translate-x-7' : 'translate-x-1'
-        } inline-block h-6 w-6 transform rounded-full bg-white shadow-lg transition-transform duration-200 flex items-center justify-center`}
+      <motion.span
+        className="inline-block h-6 w-6 rounded-full bg-white shadow-lg flex items-center justify-center"
+        animate={{ x: isDarkMode ? 28 : 4 }}
+        transition={springSnappy}
       >
         {isDarkMode ? (
           <svg className="w-3.5 h-3.5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -27,7 +29,7 @@ function DarkModeToggle() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
           </svg>
         )}
-      </span>
+      </motion.span>
     </button>
   );
 }

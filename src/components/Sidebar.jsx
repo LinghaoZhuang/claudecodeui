@@ -18,6 +18,8 @@ import { api } from '../utils/api';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
 import { IS_PLATFORM } from '../constants/config';
+import { motion, AnimatePresence } from 'framer-motion';
+import { staggerContainerVariants, staggerItemVariants, accordionVariants, scaleVariants, backdropVariants } from '../lib/animations';
 
 // Move formatTimeAgo outside component to avoid recreation on every render
 const formatTimeAgo = (dateString, currentTime, t) => {
@@ -514,8 +516,21 @@ function Sidebar({
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmation && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+        <AnimatePresence>
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          variants={backdropVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+        >
+          <motion.div
+            className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+            variants={scaleVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
             <div className="p-6">
               <div className="flex items-start gap-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
@@ -564,15 +579,29 @@ function Sidebar({
                 {t('actions.delete')}
               </Button>
             </div>
-          </div>
-        </div>,
+          </motion.div>
+        </motion.div>
+        </AnimatePresence>,
         document.body
       )}
 
       {/* Session Delete Confirmation Modal */}
       {sessionDeleteConfirmation && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+        <AnimatePresence>
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          variants={backdropVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+        >
+          <motion.div
+            className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+            variants={scaleVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
             <div className="p-6">
               <div className="flex items-start gap-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
@@ -611,8 +640,9 @@ function Sidebar({
                 {t('actions.delete')}
               </Button>
             </div>
-          </div>
-        </div>,
+          </motion.div>
+        </motion.div>
+        </AnimatePresence>,
         document.body
       )}
 
@@ -1157,17 +1187,24 @@ function Sidebar({
                   </div>
 
                   {/* Sessions List */}
+                  <AnimatePresence>
                   {isExpanded && (
-                    <div className="ml-3 space-y-1 border-l border-border pl-3">
+                    <motion.div
+                      className="ml-3 space-y-1 border-l border-border pl-3"
+                      variants={accordionVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                    >
                       {!initialSessionsLoaded.has(project.name) ? (
                         // Loading skeleton for sessions
                         Array.from({ length: 3 }).map((_, i) => (
                           <div key={i} className="p-2 rounded-md">
                             <div className="flex items-start gap-2">
-                              <div className="w-3 h-3 bg-muted rounded-full animate-pulse mt-0.5" />
+                              <div className="w-3 h-3 skeleton-shimmer rounded-full mt-0.5" />
                               <div className="flex-1 space-y-1">
-                                <div className="h-3 bg-muted rounded animate-pulse" style={{ width: `${60 + i * 15}%` }} />
-                                <div className="h-2 bg-muted rounded animate-pulse w-1/2" />
+                                <div className="h-3 skeleton-shimmer rounded" style={{ width: `${60 + i * 15}%` }} />
+                                <div className="h-2 skeleton-shimmer rounded w-1/2" />
                               </div>
                             </div>
                           </div>
@@ -1457,8 +1494,9 @@ function Sidebar({
                         <Plus className="w-3 h-3" />
                         {t('sessions.newSession')}
                       </Button>
-                    </div>
+                    </motion.div>
                   )}
+                  </AnimatePresence>
                 </div>
               );
             })

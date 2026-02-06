@@ -1,4 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { slideDownVariants } from '../lib/animations';
 
 /**
  * CommandMenu - Autocomplete dropdown for slash commands
@@ -18,26 +20,21 @@ const CommandMenu = ({ commands = [], selectedIndex = -1, onSelect, onClose, pos
   // Calculate responsive positioning
   const getMenuPosition = () => {
     const isMobile = window.innerWidth < 640;
-    const viewportHeight = window.innerHeight;
-    const menuHeight = 300; // Max height of menu
 
     if (isMobile) {
-      // On mobile, calculate bottom position dynamically to appear above the input
-      // Use the bottom value which is calculated as: window.innerHeight - textarea.top + spacing
-      const inputBottom = position.bottom || 90; // Use provided bottom or default
-
+      const inputBottom = position.bottom || 90;
       return {
         position: 'fixed',
-        bottom: `${inputBottom}px`, // Position above the input with spacing already included
+        bottom: `${inputBottom}px`,
         left: '16px',
         right: '16px',
         width: 'auto',
         maxWidth: 'calc(100vw - 32px)',
-        maxHeight: 'min(50vh, 300px)' // Limit to smaller of 50vh or 300px
+        maxHeight: 'min(50vh, 300px)'
       };
     }
 
-    // On desktop, use provided position but ensure it stays on screen
+    const viewportHeight = window.innerHeight;
     return {
       position: 'fixed',
       top: `${Math.max(16, Math.min(position.top, viewportHeight - 316))}px`,
@@ -80,31 +77,30 @@ const CommandMenu = ({ commands = [], selectedIndex = -1, onSelect, onClose, pos
     }
   }, [selectedIndex]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   // Show a message if no commands are available
-  if (commands.length === 0) {
+  if (isOpen && commands.length === 0) {
     return (
-      <div
-        ref={menuRef}
-        className="command-menu command-menu-empty"
-        style={{
-          ...menuPosition,
-          maxHeight: '300px',
-          borderRadius: '8px',
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-          zIndex: 1000,
-          padding: '20px',
-          opacity: 1,
-          transform: 'translateY(0)',
-          transition: 'opacity 150ms ease-in-out, transform 150ms ease-in-out',
-          textAlign: 'center'
-        }}
-      >
-        No commands available
-      </div>
+      <AnimatePresence>
+        <motion.div
+          ref={menuRef}
+          className="command-menu command-menu-empty"
+          style={{
+            ...menuPosition,
+            maxHeight: '300px',
+            borderRadius: '8px',
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+            zIndex: 1000,
+            padding: '20px',
+            textAlign: 'center'
+          }}
+          variants={slideDownVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+        >
+          No commands available
+        </motion.div>
+      </AnimatePresence>
     );
   }
 
@@ -133,7 +129,7 @@ const CommandMenu = ({ commands = [], selectedIndex = -1, onSelect, onClose, pos
   const orderedNamespaces = namespaceOrder.filter(ns => groupedCommands[ns]);
 
   const namespaceLabels = {
-    frequent: '⭐ Frequently Used',
+    frequent: '\u2b50 Frequently Used',
     builtin: 'Built-in Commands',
     project: 'Project Commands',
     user: 'User Commands',
@@ -154,190 +150,181 @@ const CommandMenu = ({ commands = [], selectedIndex = -1, onSelect, onClose, pos
   });
 
   return (
-    <div
-      ref={menuRef}
-      role="listbox"
-      aria-label="Available commands"
-      className="command-menu"
-      style={{
-        ...menuPosition,
-        maxHeight: '300px',
-        overflowY: 'auto',
-        borderRadius: '8px',
-        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-        zIndex: 1000,
-        padding: '8px',
-        opacity: isOpen ? 1 : 0,
-        transform: isOpen ? 'translateY(0)' : 'translateY(-10px)',
-        transition: 'opacity 150ms ease-in-out, transform 150ms ease-in-out'
-      }}
-    >
-      {orderedNamespaces.map((namespace) => (
-        <div key={namespace} className="command-group">
-          {orderedNamespaces.length > 1 && (
-            <div
-              style={{
-                fontSize: '11px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                color: '#6b7280',
-                padding: '8px 12px 4px',
-                letterSpacing: '0.05em'
-              }}
-            >
-              {namespaceLabels[namespace] || namespace}
-            </div>
-          )}
-          {groupedCommands[namespace].map((command) => {
-            const cmdWithIndex = commandsWithIndex.find(c => c.name === command.name && c.namespace === namespace);
-            const isSelected = cmdWithIndex && cmdWithIndex.globalIndex === selectedIndex;
-
-            return (
+    <AnimatePresence>
+    {isOpen && (
+      <motion.div
+        ref={menuRef}
+        role="listbox"
+        aria-label="Available commands"
+        className="command-menu"
+        style={{
+          ...menuPosition,
+          maxHeight: '300px',
+          overflowY: 'auto',
+          borderRadius: '8px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          zIndex: 1000,
+          padding: '8px'
+        }}
+        variants={slideDownVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        {orderedNamespaces.map((namespace) => (
+          <div key={namespace} className="command-group">
+            {orderedNamespaces.length > 1 && (
               <div
-                key={`${namespace}-${command.name}`}
-                ref={isSelected ? selectedItemRef : null}
-                role="option"
-                aria-selected={isSelected}
-                className="command-item"
-                onMouseEnter={() => onSelect && onSelect(command, cmdWithIndex.globalIndex, true)}
-                onClick={() => onSelect && onSelect(command, cmdWithIndex.globalIndex, false)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  padding: '10px 12px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  backgroundColor: isSelected ? '#eff6ff' : 'transparent',
-                  transition: 'background-color 100ms ease-in-out',
-                  marginBottom: '2px'
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  color: '#6b7280',
+                  padding: '8px 12px 4px',
+                  letterSpacing: '0.05em'
                 }}
-                onMouseDown={(e) => e.preventDefault()} // Prevent textarea blur
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      marginBottom: command.description ? '4px' : 0
-                    }}
-                  >
-                    {/* Command icon based on namespace */}
-                    <span
-                      style={{
-                        fontSize: '16px',
-                        flexShrink: 0
-                      }}
-                    >
-                      {namespace === 'builtin' && '⚡'}
-                      {namespace === 'project' && '📁'}
-                      {namespace === 'user' && '👤'}
-                      {namespace === 'other' && '📝'}
-                    </span>
+                {namespaceLabels[namespace] || namespace}
+              </div>
+            )}
+            {groupedCommands[namespace].map((command) => {
+              const cmdWithIndex = commandsWithIndex.find(c => c.name === command.name && c.namespace === namespace);
+              const isSelected = cmdWithIndex && cmdWithIndex.globalIndex === selectedIndex;
 
-                    {/* Command name */}
-                    <span
-                      style={{
-                        fontWeight: 600,
-                        fontSize: '14px',
-                        color: '#111827',
-                        fontFamily: 'monospace'
-                      }}
-                    >
-                      {command.name}
-                    </span>
-
-                    {/* Command metadata badge */}
-                    {command.metadata?.type && (
-                      <span
-                        className="command-metadata-badge"
-                        style={{
-                          fontSize: '10px',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          backgroundColor: '#f3f4f6',
-                          color: '#6b7280',
-                          fontWeight: 500
-                        }}
-                      >
-                        {command.metadata.type}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Command description */}
-                  {command.description && (
+              return (
+                <div
+                  key={`${namespace}-${command.name}`}
+                  ref={isSelected ? selectedItemRef : null}
+                  role="option"
+                  aria-selected={isSelected}
+                  className="command-item"
+                  onMouseEnter={() => onSelect && onSelect(command, cmdWithIndex.globalIndex, true)}
+                  onClick={() => onSelect && onSelect(command, cmdWithIndex.globalIndex, false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                    transition: 'background-color 100ms ease-in-out',
+                    marginBottom: '2px'
+                  }}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
-                        fontSize: '13px',
-                        color: '#6b7280',
-                        marginLeft: '24px',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: command.description ? '4px' : 0
                       }}
                     >
-                      {command.description}
+                      <span style={{ fontSize: '16px', flexShrink: 0 }}>
+                        {namespace === 'builtin' && '\u26a1'}
+                        {namespace === 'project' && '\ud83d\udcc1'}
+                        {namespace === 'user' && '\ud83d\udc64'}
+                        {namespace === 'other' && '\ud83d\udcdd'}
+                      </span>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          fontSize: '14px',
+                          color: '#111827',
+                          fontFamily: 'monospace'
+                        }}
+                      >
+                        {command.name}
+                      </span>
+                      {command.metadata?.type && (
+                        <span
+                          className="command-metadata-badge"
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: '#f3f4f6',
+                            color: '#6b7280',
+                            fontWeight: 500
+                          }}
+                        >
+                          {command.metadata.type}
+                        </span>
+                      )}
                     </div>
+                    {command.description && (
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          color: '#6b7280',
+                          marginLeft: '24px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                      >
+                        {command.description}
+                      </div>
+                    )}
+                  </div>
+                  {isSelected && (
+                    <span
+                      style={{
+                        marginLeft: '8px',
+                        color: '#3b82f6',
+                        fontSize: '12px',
+                        fontWeight: 600
+                      }}
+                    >
+                      \u21b5
+                    </span>
                   )}
                 </div>
+              );
+            })}
+          </div>
+        ))}
 
-                {/* Selection indicator */}
-                {isSelected && (
-                  <span
-                    style={{
-                      marginLeft: '8px',
-                      color: '#3b82f6',
-                      fontSize: '12px',
-                      fontWeight: 600
-                    }}
-                  >
-                    ↵
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
-
-      {/* Default light mode styles */}
-      <style>{`
-        .command-menu {
-          background-color: white;
-          border: 1px solid #e5e7eb;
-        }
-        .command-menu-empty {
-          color: #6b7280;
-        }
-
-        @media (prefers-color-scheme: dark) {
+        {/* Default light mode styles */}
+        <style>{`
           .command-menu {
-            background-color: #1f2937 !important;
-            border: 1px solid #374151 !important;
+            background-color: white;
+            border: 1px solid #e5e7eb;
           }
           .command-menu-empty {
-            color: #9ca3af !important;
+            color: #6b7280;
           }
-          .command-item[aria-selected="true"] {
-            background-color: #1e40af !important;
+
+          @media (prefers-color-scheme: dark) {
+            .command-menu {
+              background-color: #1f2937 !important;
+              border: 1px solid #374151 !important;
+            }
+            .command-menu-empty {
+              color: #9ca3af !important;
+            }
+            .command-item[aria-selected="true"] {
+              background-color: #1e40af !important;
+            }
+            .command-item span:not(.command-metadata-badge) {
+              color: #f3f4f6 !important;
+            }
+            .command-metadata-badge {
+              background-color: #f3f4f6 !important;
+              color: #6b7280 !important;
+            }
+            .command-item div {
+              color: #d1d5db !important;
+            }
+            .command-group > div:first-child {
+              color: #9ca3af !important;
+            }
           }
-          .command-item span:not(.command-metadata-badge) {
-            color: #f3f4f6 !important;
-          }
-          .command-metadata-badge {
-            background-color: #f3f4f6 !important;
-            color: #6b7280 !important;
-          }
-          .command-item div {
-            color: #d1d5db !important;
-          }
-          .command-group > div:first-child {
-            color: #9ca3af !important;
-          }
-        }
-      `}</style>
-    </div>
+        `}</style>
+      </motion.div>
+    )}
+    </AnimatePresence>
   );
 };
 

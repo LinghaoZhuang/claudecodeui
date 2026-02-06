@@ -56,6 +56,8 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const isConnectingRef = useRef(false);
+  const isConnectedRef = useRef(false);
   const forceResizeRef = useRef(false);  // Force resize PTY on reconnect
 
   const selectedProjectRef = useRef(selectedProject);
@@ -73,7 +75,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   });
 
   const connectWebSocket = useCallback(async () => {
-    if (isConnecting || isConnected) return;
+    if (isConnectedRef.current) return;
 
     try {
       const selectedClient = getSelectedClientId();
@@ -115,12 +117,17 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {
+        isConnectedRef.current = true;
+        isConnectingRef.current = false;
         setIsConnected(true);
         setIsConnecting(false);
 
         setTimeout(() => {
           if (fitAddon.current && terminal.current) {
-            fitAddon.current.fit();
+            const el = terminalRef.current;
+            if (el && el.offsetWidth >= 100 && el.offsetHeight >= 50) {
+              fitAddon.current.fit();
+            }
 
             ws.current.send(JSON.stringify({
               type: 'init',
@@ -172,6 +179,8 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
       };
 
       ws.current.onclose = (event) => {
+        isConnectedRef.current = false;
+        isConnectingRef.current = false;
         setIsConnected(false);
         setIsConnecting(false);
 
@@ -182,20 +191,25 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
       };
 
       ws.current.onerror = (error) => {
+        isConnectedRef.current = false;
+        isConnectingRef.current = false;
         setIsConnected(false);
         setIsConnecting(false);
       };
     } catch (error) {
+      isConnectedRef.current = false;
+      isConnectingRef.current = false;
       setIsConnected(false);
       setIsConnecting(false);
     }
-  }, [isConnecting, isConnected]);
+  }, []);
 
   const connectToShell = useCallback(() => {
-    if (!isInitialized || isConnected || isConnecting) return;
+    if (!isInitialized || isConnectedRef.current || isConnectingRef.current) return;
+    isConnectingRef.current = true;
     setIsConnecting(true);
     connectWebSocket();
-  }, [isInitialized, isConnected, isConnecting, connectWebSocket]);
+  }, [isInitialized, connectWebSocket]);
 
   const disconnectFromShell = useCallback(() => {
     if (ws.current) {
@@ -372,8 +386,11 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
     });
 
     setTimeout(() => {
-      if (fitAddon.current) {
-        fitAddon.current.fit();
+      if (fitAddon.current && terminal.current) {
+        const el = terminalRef.current;
+        if (el && el.offsetWidth >= 100 && el.offsetHeight >= 50) {
+          fitAddon.current.fit();
+        }
         if (terminal.current && ws.current && ws.current.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({
             type: 'resize',
@@ -403,13 +420,19 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
           return;
         }
 
+        // Skip resize if container is too narrow (likely hidden or transitioning)
+        if (el.offsetWidth < 100 || el.offsetHeight < 50) {
+          return;
+        }
+
         setTimeout(() => {
+          if (!fitAddon.current || !terminal.current) return;
           fitAddon.current.fit();
           const cols = terminal.current.cols;
           const rows = terminal.current.rows;
 
           // Only send resize if dimensions are reasonable
-          if (cols > 1 && rows > 1 && ws.current && ws.current.readyState === WebSocket.OPEN) {
+          if (cols > 10 && rows > 2 && ws.current && ws.current.readyState === WebSocket.OPEN) {
             ws.current.send(JSON.stringify({
               type: 'resize',
               cols,
@@ -440,9 +463,9 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   }, [selectedProject?.path || selectedProject?.fullPath, isRestarting]);
 
   useEffect(() => {
-    if (!autoConnect || !isInitialized || isConnecting || isConnected) return;
+    if (!autoConnect || !isInitialized || isConnectingRef.current || isConnectedRef.current) return;
     connectToShell();
-  }, [autoConnect, isInitialized, isConnecting, isConnected, connectToShell]);
+  }, [autoConnect, isInitialized, connectToShell]);
 
   if (!selectedProject) {
     return (

@@ -42,22 +42,22 @@ function ClaudeStatus({ status, onAbort, isLoading, provider = 'claude' }) {
   // Don't show if loading is false
   // Note: showThinking only controls the reasoning accordion in messages, not this processing indicator
   if (!isLoading) return null;
-  
+
   // Clever action words that cycle
   const actionWords = ['Thinking', 'Processing', 'Analyzing', 'Working', 'Computing', 'Reasoning'];
   const actionIndex = Math.floor(elapsedTime / 3) % actionWords.length;
-  
+
   // Parse status data
   const statusText = status?.text || actionWords[actionIndex];
   const tokens = status?.tokens || fakeTokens;
   const canInterrupt = status?.can_interrupt !== false;
-  
+
   // Animation characters
-  const spinners = ['✻', '✹', '✸', '✶'];
+  const spinners = ['\u2733', '\u2739', '\u2738', '\u2736'];
   const currentSpinner = spinners[animationPhase];
-  
+
   return (
-    <div className="w-full mb-3 sm:mb-6 animate-in slide-in-from-bottom duration-300">
+    <div className="w-full mb-3 sm:mb-6">
       <div className="flex items-center justify-between max-w-4xl mx-auto bg-gray-800 dark:bg-gray-900 text-white rounded-lg shadow-lg px-2.5 py-2 sm:px-4 sm:py-3 border border-gray-700 dark:border-gray-800">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 sm:gap-3">
@@ -76,11 +76,11 @@ function ClaudeStatus({ status, onAbort, isLoading, provider = 'claude' }) {
                 <span className="text-gray-400 text-xs sm:text-sm flex-shrink-0">({elapsedTime}s)</span>
                 {tokens > 0 && (
                   <>
-                    <span className="text-gray-500 hidden sm:inline">·</span>
-                    <span className="text-gray-300 text-xs sm:text-sm hidden sm:inline flex-shrink-0">⚒ {tokens.toLocaleString()}</span>
+                    <span className="text-gray-500 hidden sm:inline">&middot;</span>
+                    <span className="text-gray-300 text-xs sm:text-sm hidden sm:inline flex-shrink-0">&hammerpick; {tokens.toLocaleString()}</span>
                   </>
                 )}
-                <span className="text-gray-500 hidden sm:inline">·</span>
+                <span className="text-gray-500 hidden sm:inline">&middot;</span>
                 <span className="text-gray-400 text-xs sm:text-sm hidden sm:inline">esc to stop</span>
               </div>
             </div>

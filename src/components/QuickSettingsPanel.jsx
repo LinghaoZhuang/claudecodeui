@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft,
   ChevronRight,
@@ -19,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import DarkModeToggle from './DarkModeToggle';
 import { useTheme } from '../contexts/ThemeContext';
 import LanguageSelector from './LanguageSelector';
+import { slideRightVariants, backdropVariants } from '../lib/animations';
 
 const QuickSettingsPanel = ({
   isOpen,
@@ -246,10 +248,14 @@ const QuickSettingsPanel = ({
       </button>
 
       {/* Panel */}
-      <div
-        className={`fixed top-0 right-0 h-full w-64 bg-background border-l border-border shadow-xl transform transition-transform duration-150 ease-out z-40 ${
-          localIsOpen ? 'translate-x-0' : 'translate-x-full'
-        } ${isMobile ? 'h-screen' : ''}`}
+      <AnimatePresence>
+      {localIsOpen && (
+      <motion.div
+        className={`fixed top-0 right-0 h-full w-64 bg-background border-l border-border shadow-xl z-40 ${isMobile ? 'h-screen' : ''}`}
+        variants={slideRightVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
       >
         <div className="h-full flex flex-col">
           {/* Header */}
@@ -442,15 +448,23 @@ const QuickSettingsPanel = ({
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
+      )}
+      </AnimatePresence>
 
       {/* Backdrop */}
+      <AnimatePresence>
       {localIsOpen && (
-        <div
-          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-30 transition-opacity duration-150 ease-out"
+        <motion.div
+          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-30"
+          variants={backdropVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
           onClick={handleToggle}
         />
       )}
+      </AnimatePresence>
     </>
   );
 };

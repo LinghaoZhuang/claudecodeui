@@ -1,6 +1,8 @@
 import React from 'react';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { MessageSquare, Folder, Terminal, TerminalSquare, GitBranch, Globe, CheckSquare } from 'lucide-react';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
+import { springSnappy } from '../lib/animations';
 
 function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
   const { tasksEnabled } = useTasksSettings();
@@ -44,11 +46,12 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
         isInputFocused ? 'translate-y-full' : 'translate-y-0'
       }`}
     >
+      <LayoutGroup>
       <div className="flex items-center justify-around py-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
-          
+
           return (
             <button
               key={item.id}
@@ -66,12 +69,17 @@ function MobileNav({ activeTab, setActiveTab, isInputFocused }) {
             >
               <Icon className="w-5 h-5" />
               {isActive && (
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-6 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-full" />
+                <motion.div
+                  layoutId="mobile-nav-indicator"
+                  className="absolute top-0 left-1/2 transform -translate-x-1/2 w-6 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-full"
+                  transition={springSnappy}
+                />
               )}
             </button>
           );
         })}
       </div>
+      </LayoutGroup>
     </div>
   );
 }

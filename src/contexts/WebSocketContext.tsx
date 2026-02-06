@@ -26,17 +26,22 @@ const buildWebSocketUrl = (token: string | null) => {
   return `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`; // OSS mode: Use same host:port that served the page
 };
 
+const RECONNECT_BASE_DELAY = 3000;
+const RECONNECT_MAX_DELAY = 30000;
+
 const useWebSocketProviderState = (): WebSocketContextType => {
   const wsRef = useRef<WebSocket | null>(null);
-  const unmountedRef = useRef(false); // Track if component is unmounted
+  const unmountedRef = useRef(false);
   const [latestMessage, setLatestMessage] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const { token } = useAuth();
 
   useEffect(() => {
+    reconnectAttemptsRef.current = 0;
     connect();
-    
+
     return () => {
       unmountedRef.current = true;
       if (reconnectTimeoutRef.current) {
@@ -46,21 +51,28 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         wsRef.current.close();
       }
     };
-  }, [token]); // everytime token changes, we reconnect
+  }, [token]);
 
   const connect = useCallback(() => {
-    if (unmountedRef.current) return; // Prevent connection if unmounted
+    if (unmountedRef.current) return;
     try {
-      // Construct WebSocket URL
       const wsUrl = buildWebSocketUrl(token);
 
       if (!wsUrl) return console.warn('No authentication token found for WebSocket connection');
-      
+
+      // Close any lingering connection before opening a new one
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+
       const websocket = new WebSocket(wsUrl);
 
       websocket.onopen = () => {
         setIsConnected(true);
         wsRef.current = websocket;
+        reconnectAttemptsRef.current = 0; // Reset on successful connection
       };
 
       websocket.onmessage = (event) => {
@@ -75,12 +87,18 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       websocket.onclose = () => {
         setIsConnected(false);
         wsRef.current = null;
-        
-        // Attempt to reconnect after 3 seconds
+
+        // Exponential backoff: 3s → 6s → 12s → 24s → 30s (capped)
+        const delay = Math.min(
+          RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptsRef.current),
+          RECONNECT_MAX_DELAY
+        );
+        reconnectAttemptsRef.current++;
+
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (unmountedRef.current) return; // Prevent reconnection if unmounted
+          if (unmountedRef.current) return;
           connect();
-        }, 3000);
+        }, delay);
       };
 
       websocket.onerror = (error) => {
@@ -90,7 +108,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     } catch (error) {
       console.error('Error creating WebSocket connection:', error);
     }
-  }, [token]); // everytime token changes, we reconnect
+  }, [token]);
 
   const sendMessage = useCallback((message: any) => {
     const socket = wsRef.current;
