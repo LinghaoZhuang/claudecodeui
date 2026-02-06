@@ -4096,6 +4096,16 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
             setClaudeStatus(null);
           }
 
+          // Browser notification when task completes while page is hidden
+          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+            const n = new Notification('Claude 任务完成', {
+              body: `${selectedProject?.name || '项目'} 的对话已完成`,
+              icon: '/icon-192x192.png',
+              tag: 'claude-complete',
+            });
+            n.onclick = () => { window.focus(); n.close(); };
+          }
+
           // Always mark the completed session as inactive and not processing
           if (completedSessionId) {
             if (onSessionInactive) {
@@ -4139,6 +4149,19 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
           // Conversation finished; clear any stale permission prompts.
           // This does not remove saved permissions; it only resets transient UI state.
           setPendingPermissionRequests([]);
+          break;
+
+        case 'task-complete-notification':
+          // Notification broadcast from another session/slave completing
+          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+            const slaveName = latestMessage.slaveName;
+            const n = new Notification('Claude 任务完成', {
+              body: slaveName ? `${slaveName} 的任务已完成` : '有一个对话已完成',
+              icon: '/icon-192x192.png',
+              tag: 'claude-complete',
+            });
+            n.onclick = () => { window.focus(); n.close(); };
+          }
           break;
 
         case 'codex-response':
@@ -4706,6 +4729,11 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !selectedProject) return;
+
+    // Request notification permission on first user interaction
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
 
     // Apply thinking mode prefix if selected
     let messageContent = input;

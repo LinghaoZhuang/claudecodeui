@@ -14,6 +14,7 @@ class TunnelManager {
   constructor(options = {}) {
     this.secret = options.secret || process.env.CLUSTER_SECRET;
     this.authTimeout = options.authTimeout || 10000; // 10 seconds
+    this.onTaskComplete = options.onTaskComplete || null; // Callback for broadcasting task completions
 
     // Map of slaveId -> { ws, name, connectedAt, lastPing, authenticated }
     this.slaves = new Map();
@@ -251,6 +252,20 @@ class TunnelManager {
 
     if (tunnel.localWs && tunnel.localWs.readyState === WebSocket.OPEN) {
       tunnel.localWs.send(data);
+
+      // Broadcast notification to other clients when a slave task completes
+      if (this.onTaskComplete) {
+        try {
+          const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+          if (parsed.type === 'claude-complete') {
+            const slave = this.slaves.get(tunnel.slaveId);
+            this.onTaskComplete(tunnel.localWs, {
+              sessionId: parsed.sessionId,
+              slaveName: slave?.name || tunnel.slaveId,
+            });
+          }
+        } catch {}
+      }
     }
   }
 

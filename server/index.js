@@ -88,6 +88,19 @@ function broadcastProgress(progress) {
     });
 }
 
+// Broadcast task-complete notification to all clients except the originator
+function broadcastTaskComplete(excludeWs, info = {}) {
+    const message = JSON.stringify({
+        type: 'task-complete-notification',
+        ...info
+    });
+    connectedClients.forEach(client => {
+        if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
+            client.send(message);
+        }
+    });
+}
+
 // Setup file system watcher for Claude projects folder using chokidar
 async function setupProjectsWatcher() {
     const chokidar = (await import('chokidar')).default;
@@ -939,6 +952,10 @@ class WebSocketWriter {
     if (this.ws.readyState === 1) { // WebSocket.OPEN
       // Providers send raw objects, we stringify for WebSocket
       this.ws.send(JSON.stringify(data));
+      // Broadcast notification to other clients when a task completes
+      if (data && data.type === 'claude-complete') {
+        broadcastTaskComplete(this.ws, { sessionId: data.sessionId });
+      }
     }
   }
 
@@ -2094,7 +2111,8 @@ async function startServer() {
         // Initialize cluster mode
         if (DEPLOYMENT_MODE === 'master') {
             tunnelManager = new TunnelManager({
-                secret: process.env.CLUSTER_SECRET
+                secret: process.env.CLUSTER_SECRET,
+                onTaskComplete: (excludeWs, info) => broadcastTaskComplete(excludeWs, info)
             });
             // Store in app.locals so routes can access it dynamically
             app.locals.tunnelManager = tunnelManager;
