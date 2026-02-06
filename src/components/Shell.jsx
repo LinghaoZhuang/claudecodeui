@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useTranslation } from 'react-i18next';
+import { IS_PLATFORM } from '../constants/config';
 
 // Remote server for Capacitor environment
 const REMOTE_SERVER = 'code.zaneleo.top';
@@ -75,7 +76,6 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
     if (isConnecting || isConnected) return;
 
     try {
-      const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
       const selectedClient = getSelectedClientId();
       let wsUrl;
 
@@ -90,7 +90,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
         if (selectedClient && selectedClient !== 'local') {
           wsUrl += `${wsUrl.includes('?') ? '&' : '?'}_slave=${encodeURIComponent(selectedClient)}`;
         }
-      } else if (isPlatform) {
+      } else if (IS_PLATFORM) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${protocol}//${window.location.host}/shell`;
         // Add slave parameter if not local

@@ -1,3 +1,5 @@
+import { IS_PLATFORM } from "../constants/config";
+
 // Utility function for authenticated API calls
 // Remote server for Capacitor environment
 const REMOTE_SERVER = 'https://code.zaneleo.top';
@@ -28,7 +30,6 @@ const getSelectedClientId = () => {
 };
 
 export const authenticatedFetch = async (url, options = {}) => {
-  const isPlatform = import.meta.env.VITE_IS_PLATFORM === 'true';
   const token = localStorage.getItem('auth-token');
   const baseUrl = getBaseUrl();
 
@@ -39,7 +40,7 @@ export const authenticatedFetch = async (url, options = {}) => {
     defaultHeaders['Content-Type'] = 'application/json';
   }
 
-  if (!isPlatform && token) {
+  if (!IS_PLATFORM && token) {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
