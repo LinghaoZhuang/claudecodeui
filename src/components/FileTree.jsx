@@ -7,10 +7,12 @@ import { Folder, FolderOpen, File, FileText, FileCode, List, TableProperties, Ey
 import { cn } from '../lib/utils';
 import CodeEditor from './CodeEditor';
 import ImageViewer from './ImageViewer';
+import { useChatSettings } from '../contexts/ChatSettingsContext';
 import { api } from '../utils/api';
 
 function FileTree({ selectedProject }) {
   const { t } = useTranslation();
+  const { openSettings } = useChatSettings();
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState(new Set());
@@ -465,6 +467,7 @@ function FileTree({ selectedProject }) {
           file={selectedFile}
           onClose={() => setSelectedFile(null)}
           projectPath={selectedFile.projectPath}
+          onOpenSettings={openSettings}
         />
       )}
       

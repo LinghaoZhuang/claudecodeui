@@ -1,14 +1,8 @@
 /*
- * MainContent.jsx - Main Content Area with Session Protection Props Passthrough
- * 
- * SESSION PROTECTION PASSTHROUGH:
- * ===============================
- * 
- * This component serves as a passthrough layer for Session Protection functions:
- * - Receives session management functions from App.jsx
- * - Passes them down to ChatInterface.jsx
- * 
- * No session protection logic is implemented here - it's purely a props bridge.
+ * MainContent.jsx - Main Content Area
+ *
+ * This component manages the main content tabs (chat, files, shell, terminal, git, tasks)
+ * and renders the appropriate view based on the active tab.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -28,6 +22,7 @@ import Tooltip from './Tooltip';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
 import { useCluster } from '../contexts/ClusterContext';
+import { useChatSettings } from '../contexts/ChatSettingsContext';
 import { api } from '../utils/api';
 
 function MainContent({
@@ -43,22 +38,6 @@ function MainContent({
   onMenuClick,
   isLoading,
   onInputFocusChange,
-  // Session Protection Props: Functions passed down from App.jsx to manage active session state
-  // These functions control when project updates are paused during active conversations
-  onSessionActive,        // Mark session as active when user sends message
-  onSessionInactive,      // Mark session as inactive when conversation completes/aborts
-  onSessionProcessing,    // Mark session as processing (thinking/working)
-  onSessionNotProcessing, // Mark session as not processing (finished thinking)
-  processingSessions,     // Set of session IDs currently processing
-  onReplaceTemporarySession, // Replace temporary session ID with real session ID from WebSocket
-  onNavigateToSession,    // Navigate to a specific session (for Claude CLI session duplication workaround)
-  onShowSettings,         // Show tools settings panel
-  autoExpandTools,        // Auto-expand tool accordions
-  showRawParameters,      // Show raw parameters in tool accordions
-  showThinking,           // Show thinking/reasoning sections
-  autoScrollToBottom,     // Auto-scroll to bottom when new messages arrive
-  sendByCtrlEnter,        // Send by Ctrl+Enter mode for East Asian language input
-  externalMessageUpdate   // Trigger for external CLI updates to current session
 }) {
   const { t } = useTranslation();
   const [editingFile, setEditingFile] = useState(null);
@@ -84,7 +63,10 @@ function MainContent({
 
   // Cluster context for per-server limits
   const { selectedClientId } = useCluster();
-  
+
+  // Chat settings for openSettings
+  const { openSettings } = useChatSettings();
+
   // TaskMaster context
   const { tasks, currentProject, refreshTasks, setCurrentProject } = useTaskMaster();
   const { tasksEnabled, isTaskMasterInstalled, isTaskMasterReady } = useTasksSettings();
@@ -417,6 +399,7 @@ function MainContent({
               <Tooltip content={t('tabs.chat')} position="bottom">
                 <button
                   onClick={() => setActiveTab('chat')}
+                  aria-label={t('tabs.chat')}
                   className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md ${
                     activeTab === 'chat'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -424,7 +407,7 @@ function MainContent({
                   }`}
                 >
                   <span className="flex items-center gap-1 sm:gap-1.5">
-                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
                     <span className="hidden md:hidden lg:inline">{t('tabs.chat')}</span>
@@ -434,6 +417,7 @@ function MainContent({
               <Tooltip content={t('tabs.shell')} position="bottom">
                 <button
                   onClick={() => setActiveTab('shell')}
+                  aria-label={t('tabs.shell')}
                   className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 ${
                     activeTab === 'shell'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -441,7 +425,7 @@ function MainContent({
                   }`}
                 >
                   <span className="flex items-center gap-1 sm:gap-1.5">
-                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     <span className="hidden md:hidden lg:inline">{t('tabs.shell')}</span>
@@ -451,6 +435,7 @@ function MainContent({
               <Tooltip content={t('tabs.terminal')} position="bottom">
                 <button
                   onClick={() => setActiveTab('terminal')}
+                  aria-label={t('tabs.terminal')}
                   className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 ${
                     activeTab === 'terminal'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -458,7 +443,7 @@ function MainContent({
                   }`}
                 >
                   <span className="flex items-center gap-1 sm:gap-1.5">
-                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     <span className="hidden md:hidden lg:inline">{t('tabs.terminal')}</span>
@@ -468,6 +453,7 @@ function MainContent({
               <Tooltip content={t('tabs.files')} position="bottom">
                 <button
                   onClick={() => setActiveTab('files')}
+                  aria-label={t('tabs.files')}
                   className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 ${
                     activeTab === 'files'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -475,7 +461,7 @@ function MainContent({
                   }`}
                 >
                   <span className="flex items-center gap-1 sm:gap-1.5">
-                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
                     <span className="hidden md:hidden lg:inline">{t('tabs.files')}</span>
@@ -485,6 +471,7 @@ function MainContent({
               <Tooltip content={t('tabs.git')} position="bottom">
                 <button
                   onClick={() => setActiveTab('git')}
+                  aria-label={t('tabs.git')}
                   className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 ${
                     activeTab === 'git'
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -492,7 +479,7 @@ function MainContent({
                   }`}
                 >
                   <span className="flex items-center gap-1 sm:gap-1.5">
-                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
                     <span className="hidden md:hidden lg:inline">{t('tabs.git')}</span>
@@ -503,6 +490,7 @@ function MainContent({
                 <Tooltip content={t('tabs.tasks')} position="bottom">
                   <button
                     onClick={() => setActiveTab('tasks')}
+                    aria-label={t('tabs.tasks')}
                     className={`relative px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all duration-200 ${
                       activeTab === 'tasks'
                         ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
@@ -510,7 +498,7 @@ function MainContent({
                     }`}
                   >
                     <span className="flex items-center gap-1 sm:gap-1.5">
-                      <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-3 sm:w-3.5 h-3 sm:h-3.5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
                       <span className="hidden md:hidden lg:inline">{t('tabs.tasks')}</span>
@@ -552,20 +540,6 @@ function MainContent({
               latestMessage={latestMessage}
               onFileOpen={handleFileOpen}
               onInputFocusChange={onInputFocusChange}
-              onSessionActive={onSessionActive}
-              onSessionInactive={onSessionInactive}
-              onSessionProcessing={onSessionProcessing}
-              onSessionNotProcessing={onSessionNotProcessing}
-              processingSessions={processingSessions}
-              onReplaceTemporarySession={onReplaceTemporarySession}
-              onNavigateToSession={onNavigateToSession}
-              onShowSettings={onShowSettings}
-              autoExpandTools={autoExpandTools}
-              showRawParameters={showRawParameters}
-              showThinking={showThinking}
-              autoScrollToBottom={autoScrollToBottom}
-              sendByCtrlEnter={sendByCtrlEnter}
-              externalMessageUpdate={externalMessageUpdate}
               onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
             />
           </ErrorBoundary>
@@ -708,6 +682,7 @@ function MainContent({
                 isSidebar={true}
                 isExpanded={editorExpanded}
                 onToggleExpand={handleToggleEditorExpand}
+                onOpenSettings={openSettings}
               />
             </div>
           </>
@@ -721,6 +696,7 @@ function MainContent({
           onClose={handleCloseEditor}
           projectPath={selectedProject?.path}
           isSidebar={false}
+          onOpenSettings={openSettings}
         />
       )}
 

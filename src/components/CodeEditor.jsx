@@ -14,7 +14,7 @@ import { X, Save, Download, Maximize2, Minimize2 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useTranslation } from 'react-i18next';
 
-function CodeEditor({ file, onClose, projectPath, isSidebar = false, isExpanded = false, onToggleExpand = null }) {
+function CodeEditor({ file, onClose, projectPath, isSidebar = false, isExpanded = false, onToggleExpand = null, onOpenSettings = null }) {
   const { t } = useTranslation('codeEditor');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -39,6 +39,12 @@ function CodeEditor({ file, onClose, projectPath, isSidebar = false, isExpanded 
     return localStorage.getItem('codeEditorFontSize') || '14';
   });
   const editorRef = useRef(null);
+  const onOpenSettingsRef = useRef(onOpenSettings);
+
+  // Keep the ref current
+  useEffect(() => {
+    onOpenSettingsRef.current = onOpenSettings;
+  }, [onOpenSettings]);
 
   // Create minimap extension with chunk-based gutters
   const minimapExtension = useMemo(() => {
@@ -230,8 +236,8 @@ function CodeEditor({ file, onClose, projectPath, isSidebar = false, isExpanded 
         // Attach event listener for settings button
         const settingsBtn = dom.querySelector('.cm-settings-btn');
         settingsBtn?.addEventListener('click', () => {
-          if (window.openSettings) {
-            window.openSettings('appearance');
+          if (onOpenSettingsRef.current) {
+            onOpenSettingsRef.current('appearance');
           }
         });
 

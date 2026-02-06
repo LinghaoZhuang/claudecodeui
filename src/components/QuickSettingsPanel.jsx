@@ -19,25 +19,23 @@ import {
 import { useTranslation } from 'react-i18next';
 import DarkModeToggle from './DarkModeToggle';
 import { useTheme } from '../contexts/ThemeContext';
+import { useChatSettings } from '../contexts/ChatSettingsContext';
 import LanguageSelector from './LanguageSelector';
 import { slideRightVariants, backdropVariants } from '../lib/animations';
 
 const QuickSettingsPanel = ({
   isOpen,
   onToggle,
-  autoExpandTools,
-  onAutoExpandChange,
-  showRawParameters,
-  onShowRawParametersChange,
-  showThinking,
-  onShowThinkingChange,
-  autoScrollToBottom,
-  onAutoScrollChange,
-  sendByCtrlEnter,
-  onSendByCtrlEnterChange,
   isMobile
 }) => {
   const { t } = useTranslation('settings');
+  const {
+    autoExpandTools, setAutoExpandTools,
+    showRawParameters, setShowRawParameters,
+    showThinking, setShowThinking,
+    autoScrollToBottom, setAutoScrollToBottom,
+    sendByCtrlEnter, setSendByCtrlEnter,
+  } = useChatSettings();
   const [localIsOpen, setLocalIsOpen] = useState(isOpen);
   const [whisperMode, setWhisperMode] = useState(() => {
     return localStorage.getItem('whisperMode') || 'default';
@@ -298,7 +296,7 @@ const QuickSettingsPanel = ({
                 <input
                   type="checkbox"
                   checked={autoExpandTools}
-                  onChange={(e) => onAutoExpandChange(e.target.checked)}
+                  onChange={(e) => setAutoExpandTools(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>
@@ -311,7 +309,7 @@ const QuickSettingsPanel = ({
                 <input
                   type="checkbox"
                   checked={showRawParameters}
-                  onChange={(e) => onShowRawParametersChange(e.target.checked)}
+                  onChange={(e) => setShowRawParameters(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>
@@ -324,7 +322,7 @@ const QuickSettingsPanel = ({
                 <input
                   type="checkbox"
                   checked={showThinking}
-                  onChange={(e) => onShowThinkingChange(e.target.checked)}
+                  onChange={(e) => setShowThinking(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>
@@ -341,7 +339,7 @@ const QuickSettingsPanel = ({
                 <input
                   type="checkbox"
                   checked={autoScrollToBottom}
-                  onChange={(e) => onAutoScrollChange(e.target.checked)}
+                  onChange={(e) => setAutoScrollToBottom(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>
@@ -359,7 +357,7 @@ const QuickSettingsPanel = ({
                 <input
                   type="checkbox"
                   checked={sendByCtrlEnter}
-                  onChange={(e) => onSendByCtrlEnterChange(e.target.checked)}
+                  onChange={(e) => setSendByCtrlEnter(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>

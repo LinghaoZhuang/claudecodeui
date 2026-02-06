@@ -18,7 +18,7 @@
  * Handles both existing sessions (with real IDs) and new sessions (with temporary IDs).
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Settings as SettingsIcon, Sparkles } from 'lucide-react';
 import Sidebar from './components/Sidebar';
@@ -33,12 +33,15 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { TaskMasterProvider } from './contexts/TaskMasterContext';
 import { TasksSettingsProvider } from './contexts/TasksSettingsContext';
+import { ChatSettingsProvider, useChatSettings } from './contexts/ChatSettingsContext';
+import { SessionProtectionProvider, useSessionProtection } from './contexts/SessionProtectionContext';
 import { WebSocketProvider, useWebSocket } from './contexts/WebSocketContext';
 import { ClusterProvider, useCluster, getSelectedClientId } from './contexts/ClusterContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useVersionCheck } from './hooks/useVersionCheck';
 import useLocalStorage from './hooks/useLocalStorage';
 import { api, authenticatedFetch } from './utils/api';
+import { ProjectRefreshProvider, useProjectRefresh } from './contexts/ProjectRefreshContext';
 import { I18nextProvider, useTranslation } from 'react-i18next';
 import i18n from './i18n/config.js';
 
@@ -82,28 +85,12 @@ function AppContent() {
   const [isLoadingProjects, setIsLoadingProjects] = useState(cachedProjects.length === 0);
   const [loadingProgress, setLoadingProgress] = useState(null); // { phase, current, total, currentProject }
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState('agents');
   const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [autoExpandTools, setAutoExpandTools] = useLocalStorage('autoExpandTools', false);
-  const [showRawParameters, setShowRawParameters] = useLocalStorage('showRawParameters', false);
-  const [showThinking, setShowThinking] = useLocalStorage('showThinking', true);
-  const [autoScrollToBottom, setAutoScrollToBottom] = useLocalStorage('autoScrollToBottom', true);
-  const [sendByCtrlEnter, setSendByCtrlEnter] = useLocalStorage('sendByCtrlEnter', false);
+  const { showSettings, settingsInitialTab, openSettings, closeSettings } = useChatSettings();
   const [sidebarVisible, setSidebarVisible] = useLocalStorage('sidebarVisible', true);
-  // Session Protection System: Track sessions with active conversations to prevent
-  // automatic project updates from interrupting ongoing chats. When a user sends
-  // a message, the session is marked as "active" and project updates are paused
-  // until the conversation completes or is aborted.
-  const [activeSessions, setActiveSessions] = useState(new Set()); // Track sessions with active conversations
+  const { activeSessions, triggerExternalUpdate, hasActiveSession } = useSessionProtection();
 
-  // Processing Sessions: Track which sessions are currently thinking/processing
-  // This allows us to restore the "Thinking..." banner when switching back to a processing session
-  const [processingSessions, setProcessingSessions] = useState(new Set());
-
-  // External Message Update Trigger: Incremented when external CLI modifies current session's JSONL
-  // Triggers ChatInterface to reload messages without switching sessions
-  const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
+  const { setRefreshFn } = useProjectRefresh();
 
   const { ws, sendMessage, latestMessage } = useWebSocket();
 
@@ -267,7 +254,7 @@ function AppContent() {
 
               if (!isSessionActive) {
                 // Session is not active - safe to reload messages
-                setExternalMessageUpdate(prev => prev + 1);
+                triggerExternalUpdate();
               }
             }
           }
@@ -275,13 +262,7 @@ function AppContent() {
 
         // Session Protection Logic: Allow additions but prevent changes during active conversations
         // This allows new sessions/projects to appear in sidebar while protecting active chat messages
-        // We check for two types of active sessions:
-        // 1. Existing sessions: selectedSession.id exists in activeSessions
-        // 2. New sessions: temporary "new-session-*" identifiers in activeSessions (before real session ID is received)
-        const hasActiveSession = (selectedSession && activeSessions.has(selectedSession.id)) ||
-                                 (activeSessions.size > 0 && Array.from(activeSessions).some(id => id.startsWith('new-session-')));
-        
-        if (hasActiveSession) {
+        if (hasActiveSession(selectedSession?.id)) {
           // Allow updates but be selective: permit additions, prevent changes to existing items
           const updatedProjects = latestMessage.projects;
           const currentProjects = projects;
@@ -390,14 +371,10 @@ function AppContent() {
     }
   };
 
-  // Expose fetchProjects globally for component access
-  window.refreshProjects = fetchProjects;
-
-  // Expose openSettings function globally for component access
-  window.openSettings = useCallback((tab = 'tools') => {
-    setSettingsInitialTab(tab);
-    setShowSettings(true);
-  }, []);
+  // Register fetchProjects in the ProjectRefreshContext
+  useEffect(() => {
+    setRefreshFn(fetchProjects);
+  }, [setRefreshFn]);
 
   // Handle URL-based session loading
   useEffect(() => {
@@ -557,66 +534,6 @@ function AppContent() {
       prevProjects.filter(project => project.name !== projectName)
     );
   };
-
-  // Session Protection Functions: Manage the lifecycle of active sessions
-  
-  // markSessionAsActive: Called when user sends a message to mark session as protected
-  // This includes both real session IDs and temporary "new-session-*" identifiers
-  const markSessionAsActive = useCallback((sessionId) => {
-    if (sessionId) {
-      setActiveSessions(prev => new Set([...prev, sessionId]));
-    }
-  }, []);
-
-  // markSessionAsInactive: Called when conversation completes/aborts to re-enable project updates
-  const markSessionAsInactive = useCallback((sessionId) => {
-    if (sessionId) {
-      setActiveSessions(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(sessionId);
-        return newSet;
-      });
-    }
-  }, []);
-
-  // Processing Session Functions: Track which sessions are currently thinking/processing
-
-  // markSessionAsProcessing: Called when Claude starts thinking/processing
-  const markSessionAsProcessing = useCallback((sessionId) => {
-    if (sessionId) {
-      setProcessingSessions(prev => new Set([...prev, sessionId]));
-    }
-  }, []);
-
-  // markSessionAsNotProcessing: Called when Claude finishes thinking/processing
-  const markSessionAsNotProcessing = useCallback((sessionId) => {
-    if (sessionId) {
-      setProcessingSessions(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(sessionId);
-        return newSet;
-      });
-    }
-  }, []);
-
-  // replaceTemporarySession: Called when WebSocket provides real session ID for new sessions
-  // Removes temporary "new-session-*" identifiers and adds the real session ID
-  // This maintains protection continuity during the transition from temporary to real session
-  const replaceTemporarySession = useCallback((realSessionId) => {
-    if (realSessionId) {
-      setActiveSessions(prev => {
-        const newSet = new Set();
-        // Keep all non-temporary sessions and add the real session ID
-        for (const sessionId of prev) {
-          if (!sessionId.startsWith('new-session-')) {
-            newSet.add(sessionId);
-          }
-        }
-        newSet.add(realSessionId);
-        return newSet;
-      });
-    }
-  }, []);
 
   // Version Upgrade Modal Component
   const VersionUpgradeModal = () => {
@@ -839,7 +756,7 @@ function AppContent() {
                 isLoading={isLoadingProjects}
                 loadingProgress={loadingProgress}
                 onRefresh={handleSidebarRefresh}
-                onShowSettings={() => setShowSettings(true)}
+                onShowSettings={() => openSettings()}
                 updateAvailable={updateAvailable}
                 latestVersion={latestVersion}
                 currentVersion={currentVersion}
@@ -871,7 +788,7 @@ function AppContent() {
 
                 {/* Settings Icon */}
                 <button
-                  onClick={() => setShowSettings(true)}
+                  onClick={() => openSettings()}
                   className="p-2 hover:bg-accent rounded-md transition-colors duration-200"
                   aria-label={t('versionUpdate.ariaLabels.settings')}
                   title={t('versionUpdate.ariaLabels.settings')}
@@ -940,7 +857,7 @@ function AppContent() {
                 isLoading={isLoadingProjects}
                 loadingProgress={loadingProgress}
                 onRefresh={handleSidebarRefresh}
-                onShowSettings={() => setShowSettings(true)}
+                onShowSettings={() => openSettings()}
                 updateAvailable={updateAvailable}
                 latestVersion={latestVersion}
                 currentVersion={currentVersion}
@@ -971,20 +888,6 @@ function AppContent() {
           onMenuClick={() => setSidebarOpen(true)}
           isLoading={isLoadingProjects}
           onInputFocusChange={setIsInputFocused}
-          onSessionActive={markSessionAsActive}
-          onSessionInactive={markSessionAsInactive}
-          onSessionProcessing={markSessionAsProcessing}
-          onSessionNotProcessing={markSessionAsNotProcessing}
-          processingSessions={processingSessions}
-          onReplaceTemporarySession={replaceTemporarySession}
-          onNavigateToSession={(sessionId) => navigate(`/session/${sessionId}`)}
-          onShowSettings={() => setShowSettings(true)}
-          autoExpandTools={autoExpandTools}
-          showRawParameters={showRawParameters}
-          showThinking={showThinking}
-          autoScrollToBottom={autoScrollToBottom}
-          sendByCtrlEnter={sendByCtrlEnter}
-          externalMessageUpdate={externalMessageUpdate}
         />
       </div>
 
@@ -1001,16 +904,6 @@ function AppContent() {
         <QuickSettingsPanel
           isOpen={showQuickSettings}
           onToggle={setShowQuickSettings}
-          autoExpandTools={autoExpandTools}
-          onAutoExpandChange={setAutoExpandTools}
-          showRawParameters={showRawParameters}
-          onShowRawParametersChange={setShowRawParameters}
-          showThinking={showThinking}
-          onShowThinkingChange={setShowThinking}
-          autoScrollToBottom={autoScrollToBottom}
-          onAutoScrollChange={setAutoScrollToBottom}
-          sendByCtrlEnter={sendByCtrlEnter}
-          onSendByCtrlEnterChange={setSendByCtrlEnter}
           isMobile={isMobile}
         />
       )}
@@ -1018,7 +911,7 @@ function AppContent() {
       {/* Settings Modal */}
       <Settings
         isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
+        onClose={closeSettings}
         projects={projects}
         initialTab={settingsInitialTab}
       />
@@ -1038,16 +931,22 @@ function App() {
           <WebSocketProvider>
             <ClusterProvider>
               <TasksSettingsProvider>
-                <TaskMasterProvider>
-                  <ProtectedRoute>
-                    <Router basename={window.__ROUTER_BASENAME__ || ''}>
-                      <Routes>
-                        <Route path="/" element={<AppContent />} />
-                        <Route path="/session/:sessionId" element={<AppContent />} />
-                      </Routes>
-                    </Router>
-                  </ProtectedRoute>
-                </TaskMasterProvider>
+                <ChatSettingsProvider>
+                  <SessionProtectionProvider>
+                    <ProjectRefreshProvider>
+                    <TaskMasterProvider>
+                    <ProtectedRoute>
+                      <Router basename={window.__ROUTER_BASENAME__ || ''}>
+                        <Routes>
+                          <Route path="/" element={<AppContent />} />
+                          <Route path="/session/:sessionId" element={<AppContent />} />
+                        </Routes>
+                      </Router>
+                    </ProtectedRoute>
+                  </TaskMasterProvider>
+                  </ProjectRefreshProvider>
+                  </SessionProtectionProvider>
+                </ChatSettingsProvider>
               </TasksSettingsProvider>
             </ClusterProvider>
           </WebSocketProvider>

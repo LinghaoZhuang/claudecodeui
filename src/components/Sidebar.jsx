@@ -297,11 +297,7 @@ function Sidebar({
 
       if (response.ok) {
         // Refresh projects to get updated data
-        if (window.refreshProjects) {
-          window.refreshProjects();
-        } else {
-          window.location.reload();
-        }
+        onRefresh();
       } else {
         console.error('Failed to rename project');
       }
@@ -414,11 +410,7 @@ function Sidebar({
         setNewProjectPath('');
 
         // Refresh projects to show the new one
-        if (window.refreshProjects) {
-          window.refreshProjects();
-        } else {
-          window.location.reload();
-        }
+            onRefresh();
       } else {
         const error = await response.json();
         alert(error.error || t('messages.createProjectFailed'));
@@ -504,11 +496,7 @@ function Sidebar({
           onClose={() => setShowNewProject(false)}
           onProjectCreated={(project) => {
             // Refresh projects list after creation
-            if (window.refreshProjects) {
-              window.refreshProjects();
-            } else {
-              window.location.reload();
-            }
+            onRefresh();
           }}
         />,
         document.body
@@ -1113,68 +1101,73 @@ function Sidebar({
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {editingProject === project.name ? (
                           <>
-                            <div
-                              className="w-6 h-6 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center justify-center rounded cursor-pointer transition-colors"
+                            <button
+                              className="w-6 h-6 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center justify-center rounded cursor-pointer transition-colors border-0 bg-transparent p-0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 saveProjectName(project.name);
                               }}
+                              aria-label={t('tooltips.save')}
                             >
                               <Check className="w-3 h-3" />
-                            </div>
-                            <div
-                              className="w-6 h-6 text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center rounded cursor-pointer transition-colors"
+                            </button>
+                            <button
+                              className="w-6 h-6 text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-center rounded cursor-pointer transition-colors border-0 bg-transparent p-0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 cancelEditing();
                               }}
+                              aria-label={t('tooltips.cancel')}
                             >
                               <X className="w-3 h-3" />
-                            </div>
+                            </button>
                           </>
                         ) : (
                           <>
                             {/* Star button */}
-                            <div
+                            <button
                               className={cn(
-                                "w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center rounded cursor-pointer touch:opacity-100",
-                                isStarred 
-                                  ? "hover:bg-yellow-50 dark:hover:bg-yellow-900/20 opacity-100" 
+                                "w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center rounded cursor-pointer touch:opacity-100 border-0 bg-transparent p-0",
+                                isStarred
+                                  ? "hover:bg-yellow-50 dark:hover:bg-yellow-900/20 opacity-100"
                                   : "hover:bg-accent"
                               )}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleStarProject(project.name);
                               }}
+                              aria-label={isStarred ? t('tooltips.removeFromFavorites') : t('tooltips.addToFavorites')}
                               title={isStarred ? t('tooltips.removeFromFavorites') : t('tooltips.addToFavorites')}
                             >
                               <Star className={cn(
                                 "w-3 h-3 transition-colors",
-                                isStarred 
-                                  ? "text-yellow-600 dark:text-yellow-400 fill-current" 
+                                isStarred
+                                  ? "text-yellow-600 dark:text-yellow-400 fill-current"
                                   : "text-muted-foreground"
                               )} />
-                            </div>
-                            <div
-                              className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-accent flex items-center justify-center rounded cursor-pointer touch:opacity-100"
+                            </button>
+                            <button
+                              className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-accent flex items-center justify-center rounded cursor-pointer touch:opacity-100 border-0 bg-transparent p-0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 startEditing(project);
                               }}
+                              aria-label={t('tooltips.renameProject')}
                               title={t('tooltips.renameProject')}
                             >
                               <Edit3 className="w-3 h-3" />
-                            </div>
-                            <div
-                                className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center rounded cursor-pointer touch:opacity-100"
+                            </button>
+                            <button
+                                className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center justify-center rounded cursor-pointer touch:opacity-100 border-0 bg-transparent p-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   deleteProject(project);
                                 }}
+                                aria-label={t('tooltips.deleteProject')}
                                 title={t('tooltips.deleteProject')}
                               >
                                 <Trash2 className="w-3 h-3 text-red-600 dark:text-red-400" />
-                              </div>
+                              </button>
                             {isExpanded ? (
                               <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                             ) : (
