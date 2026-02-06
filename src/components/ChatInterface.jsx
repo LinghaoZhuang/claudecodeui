@@ -4096,16 +4096,6 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
             setClaudeStatus(null);
           }
 
-          // Browser notification when task completes while page is hidden
-          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-            const n = new Notification('Claude 任务完成', {
-              body: `${selectedProject?.name || '项目'} 的对话已完成`,
-              icon: '/icon-192x192.png',
-              tag: 'claude-complete',
-            });
-            n.onclick = () => { window.focus(); n.close(); };
-          }
-
           // Always mark the completed session as inactive and not processing
           if (completedSessionId) {
             if (onSessionInactive) {
@@ -4152,11 +4142,10 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
           break;
 
         case 'task-complete-notification':
-          // Notification broadcast from another session/slave completing
+          // Notification from Stop hook via API
           if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-            const slaveName = latestMessage.slaveName;
             const n = new Notification('Claude 任务完成', {
-              body: slaveName ? `${slaveName} 的任务已完成` : '有一个对话已完成',
+              body: latestMessage.message || 'Claude Code 任务已完成',
               icon: '/icon-192x192.png',
               tag: 'claude-complete',
             });

@@ -88,19 +88,6 @@ function broadcastProgress(progress) {
     });
 }
 
-// Broadcast task-complete notification to all clients except the originator
-function broadcastTaskComplete(excludeWs, info = {}) {
-    const message = JSON.stringify({
-        type: 'task-complete-notification',
-        ...info
-    });
-    connectedClients.forEach(client => {
-        if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
-            client.send(message);
-        }
-    });
-}
-
 // Setup file system watcher for Claude projects folder using chokidar
 async function setupProjectsWatcher() {
     const chokidar = (await import('chokidar')).default;
@@ -360,6 +347,22 @@ app.use(express.static(path.join(__dirname, '../dist'), {
 // API Routes (protected)
 // /api/config endpoint removed - no longer needed
 // Frontend now uses window.location for WebSocket URLs
+
+// Task completion notification endpoint (called by Claude Code Stop hook)
+app.post('/api/notify/task-complete', (req, res) => {
+    const { message, source } = req.body || {};
+    const notification = JSON.stringify({
+        type: 'task-complete-notification',
+        message: message || 'Claude Code 任务已完成',
+        source: source || 'unknown',
+    });
+    connectedClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(notification);
+        }
+    });
+    res.json({ ok: true });
+});
 
 // System update endpoint
 app.post('/api/system/update', authenticateToken, async (req, res) => {
@@ -952,10 +955,6 @@ class WebSocketWriter {
     if (this.ws.readyState === 1) { // WebSocket.OPEN
       // Providers send raw objects, we stringify for WebSocket
       this.ws.send(JSON.stringify(data));
-      // Broadcast notification to other clients when a task completes
-      if (data && data.type === 'claude-complete') {
-        broadcastTaskComplete(this.ws, { sessionId: data.sessionId });
-      }
     }
   }
 
@@ -2111,8 +2110,7 @@ async function startServer() {
         // Initialize cluster mode
         if (DEPLOYMENT_MODE === 'master') {
             tunnelManager = new TunnelManager({
-                secret: process.env.CLUSTER_SECRET,
-                onTaskComplete: (excludeWs, info) => broadcastTaskComplete(excludeWs, info)
+                secret: process.env.CLUSTER_SECRET
             });
             // Store in app.locals so routes can access it dynamically
             app.locals.tunnelManager = tunnelManager;
