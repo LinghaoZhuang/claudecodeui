@@ -23,6 +23,18 @@ import { CLAUDE_MODELS } from '../shared/modelConstants.js';
 
 // Session tracking: Map of session IDs to active query instances
 const activeSessions = new Map();
+
+// Periodically reap sessions stuck for over 2 hours (e.g. orphaned by crashes).
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of activeSessions) {
+    if (now - session.startTime > SESSION_MAX_AGE_MS) {
+      console.warn(`[claude-sdk] Reaping stale session ${id} (age: ${Math.round((now - session.startTime) / 60000)}min)`);
+      activeSessions.delete(id);
+    }
+  }
+}, 10 * 60 * 1000); // check every 10 minutes
 // In-memory registry of pending tool approvals keyed by requestId.
 // This does not persist approvals or share across processes; it exists so the
 // SDK can pause tool execution while the UI decides what to do.

@@ -87,16 +87,24 @@ let projectsWatcher = null;
 const connectedClients = new Set();
 let isGetProjectsRunning = false; // Flag to prevent reentrant calls
 
-// Broadcast progress to all connected WebSocket clients
-function broadcastProgress(progress) {
-    const message = JSON.stringify({
-        type: 'loading_progress',
-        ...progress
-    });
+// Broadcast a pre-serialised message string to all connected WebSocket clients.
+// Removes closed/broken clients to prevent the Set from growing unbounded.
+function broadcast(message) {
     connectedClients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(message);
+        } else if (client.readyState === WebSocket.CLOSED || client.readyState === WebSocket.CLOSING) {
+            connectedClients.delete(client);
         }
+    });
+}
+
+// Broadcast progress to all connected WebSocket clients
+function broadcastProgress(progress) {
+    broadcast(JSON.stringify({
+        type: 'loading_progress',
+        ...progress
+    }));
     });
 }
 
@@ -159,11 +167,7 @@ async function setupProjectsWatcher() {
                         changedFile: path.relative(claudeProjectsPath, filePath)
                     });
 
-                    connectedClients.forEach(client => {
-                        if (client.readyState === WebSocket.OPEN) {
-                            client.send(updateMessage);
-                        }
-                    });
+                    broadcast(updateMessage);
 
                 } catch (error) {
                     console.error('[ERROR] Error handling project changes:', error);
@@ -198,6 +202,24 @@ const server = http.createServer(app);
 const ptySessionsMap = new Map();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const MAX_SHELLS_PER_TYPE = 3; // Max shells per type (plain / claude / cursor)
+
+// Periodic sweep: kill PTY sessions with no live clients that somehow missed timeout.
+setInterval(() => {
+    for (const [key, session] of ptySessionsMap) {
+        // Remove clients that are no longer open
+        for (const client of session.clients) {
+            if (client.readyState !== WebSocket.OPEN) {
+                session.clients.delete(client);
+            }
+        }
+        // If no live clients and no pending timeout, clean up now
+        if (session.clients.size === 0 && !session.timeoutId) {
+            console.log(`[PTY sweep] Cleaning orphaned session: ${key}`);
+            if (session.pty && session.pty.kill) session.pty.kill();
+            ptySessionsMap.delete(key);
+        }
+    }
+}, 5 * 60 * 1000); // every 5 minutes
 
 // Single WebSocket server that handles both paths
 const wss = new WebSocketServer({
@@ -368,15 +390,9 @@ app.post('/api/notify/task-complete', (req, res) => {
         message: message || 'Claude Code 任务已完成',
         source: source || 'unknown',
     });
-    let sent = 0;
-    connectedClients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(notification);
-            sent++;
-        }
-    });
-    console.log(`[Notify] Task-complete broadcast to ${sent}/${connectedClients.size} clients, source: ${source || 'unknown'}`);
-    res.json({ ok: true, clients: sent });
+    broadcast(notification);
+    console.log(`[Notify] Task-complete broadcast to ${connectedClients.size} clients, source: ${source || 'unknown'}`);
+    res.json({ ok: true });
 });
 
 // System update endpoint

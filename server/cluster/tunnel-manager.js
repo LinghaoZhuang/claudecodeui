@@ -20,6 +20,7 @@ class TunnelManager {
 
     // Map of requestId -> { resolve, reject, timeout }
     this.pendingRequests = new Map();
+    this.maxPendingRequests = options.maxPendingRequests || 500;
 
     // Map of tunnelId -> { slaveId, localWs }
     this.tunnels = new Map();
@@ -124,6 +125,13 @@ class TunnelManager {
             }
             this.tunnels.delete(tunnelId);
           }
+        }
+
+        // Reject any pending requests that were routed to this slave
+        for (const [requestId, pending] of this.pendingRequests.entries()) {
+          clearTimeout(pending.timeout);
+          this.pendingRequests.delete(requestId);
+          pending.reject(new Error(`Slave ${slaveId} disconnected`));
         }
       }
     });
@@ -365,6 +373,11 @@ class TunnelManager {
     const fullPath = request.originalUrl;
 
     return new Promise((resolve, reject) => {
+      // Guard against unbounded growth
+      if (this.pendingRequests.size >= this.maxPendingRequests) {
+        return reject(new Error('Too many pending requests'));
+      }
+
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error('Request timeout'));
