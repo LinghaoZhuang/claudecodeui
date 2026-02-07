@@ -1304,6 +1304,19 @@ function handleShellConnection(ws) {
                         console.log(`🔀 Re-keying PTY session: ${defaultKey} → ${ptySessionKey}`);
                         ptySessionsMap.delete(defaultKey);
                         defaultSession.sessionId = sessionId;
+
+                        // Rename tmux session to match new key so the old default name is freed up
+                        if (defaultSession.tmuxSessionName) {
+                            const newTmuxName = getTmuxSessionName(ptySessionKey, tmuxType);
+                            try {
+                                execSync(`tmux -L ${TMUX_SOCKET} rename-session -t ${defaultSession.tmuxSessionName} ${newTmuxName} 2>/dev/null`);
+                                console.log(`[tmux] Renamed session: ${defaultSession.tmuxSessionName} → ${newTmuxName}`);
+                                defaultSession.tmuxSessionName = newTmuxName;
+                            } catch (e) {
+                                console.log(`[tmux] Failed to rename session: ${e.message}`);
+                            }
+                        }
+
                         ptySessionsMap.set(ptySessionKey, defaultSession);
                         existingSession = defaultSession;
                     }
