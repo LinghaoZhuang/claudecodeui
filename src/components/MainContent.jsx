@@ -572,6 +572,7 @@ function MainContent({
                 project={project}
                 session={session}
                 showHeader={false}
+                autoConnect={isActive}
               />
             </div>
           );
@@ -597,6 +598,7 @@ function MainContent({
                 project={project}
                 isPlainShell={true}
                 showHeader={false}
+                autoConnect={isActive}
               />
             </div>
           );
