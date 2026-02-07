@@ -1304,19 +1304,7 @@ function handleShellConnection(ws) {
                         console.log(`🔀 Re-keying PTY session: ${defaultKey} → ${ptySessionKey}`);
                         ptySessionsMap.delete(defaultKey);
                         defaultSession.sessionId = sessionId;
-
-                        // Rename tmux session to match new key so the old default name is freed up
-                        if (defaultSession.tmuxSessionName) {
-                            const newTmuxName = getTmuxSessionName(ptySessionKey, tmuxType);
-                            try {
-                                execSync(`tmux -L ${TMUX_SOCKET} rename-session -t ${defaultSession.tmuxSessionName} ${newTmuxName} 2>/dev/null`);
-                                console.log(`[tmux] Renamed session: ${defaultSession.tmuxSessionName} → ${newTmuxName}`);
-                                defaultSession.tmuxSessionName = newTmuxName;
-                            } catch (e) {
-                                console.log(`[tmux] Failed to rename session: ${e.message}`);
-                            }
-                        }
-
+                        // Don't rename tmux session - keep original name so ccui CLI can still find it
                         ptySessionsMap.set(ptySessionKey, defaultSession);
                         existingSession = defaultSession;
                     }
@@ -1412,7 +1400,20 @@ function handleShellConnection(ws) {
                         console.log(`[tmux] Found orphaned session under default key: ${defaultTmuxName}`);
                     }
                 }
-                const hasTmuxSession = !isLoginCommand && tmuxSessionExists(effectiveTmuxName);
+
+                // Before reattaching, check if the tmux session is already managed by another ptySessionsMap entry
+                let tmuxAlreadyClaimed = false;
+                if (tmuxSessionExists(effectiveTmuxName)) {
+                    for (const [mapKey, mapSession] of ptySessionsMap) {
+                        if (mapSession.tmuxSessionName === effectiveTmuxName && mapKey !== ptySessionKey) {
+                            tmuxAlreadyClaimed = true;
+                            console.log(`[tmux] Session ${effectiveTmuxName} already claimed by ${mapKey}, skipping reattach`);
+                            break;
+                        }
+                    }
+                }
+
+                const hasTmuxSession = !isLoginCommand && !tmuxAlreadyClaimed && tmuxSessionExists(effectiveTmuxName);
                 if (hasTmuxSession) {
                     console.log(`[tmux] Found orphaned tmux session ${effectiveTmuxName}, reattaching...`);
 
@@ -1625,10 +1626,22 @@ function handleShellConnection(ws) {
                         // tmux shell-command is passed to /bin/sh -c, so wrap in bash -l -c for login shell env
                         const escapedForShell = shellCommand.replace(/'/g, "'\\''");
                         const wrappedCommand = `bash -l -c '${escapedForShell}'`;
+
+                        // If tmux name is already taken (e.g. by ccui CLI or another session), add suffix
+                        let actualTmuxName = tmuxName;
+                        let suffix = 0;
+                        while (tmuxSessionExists(actualTmuxName)) {
+                            suffix++;
+                            actualTmuxName = `${tmuxName}_${suffix}`;
+                        }
+                        if (suffix > 0) {
+                            console.log(`[tmux] Name ${tmuxName} taken, using ${actualTmuxName}`);
+                        }
+
                         const tmuxResult = spawnSync('tmux', [
                             '-L', TMUX_SOCKET, '-f', TMUX_CONF_PATH,
                             'new-session', '-d',
-                            '-s', tmuxName,
+                            '-s', actualTmuxName,
                             '-x', String(data.cols || 80),
                             '-y', String(data.rows || 24),
                             wrappedCommand
@@ -1636,9 +1649,10 @@ function handleShellConnection(ws) {
                         if (tmuxResult.status !== 0) {
                             throw new Error(`tmux new-session failed: ${(tmuxResult.stderr || '').toString().trim()}`);
                         }
-                        console.log(`[tmux] Created detached session ${tmuxName}`);
+                        console.log(`[tmux] Created detached session ${actualTmuxName}`);
+                        tmuxName = actualTmuxName;
                         shell = 'tmux';
-                        shellArgs = ['-L', TMUX_SOCKET, 'attach-session', '-t', tmuxName];
+                        shellArgs = ['-L', TMUX_SOCKET, 'attach-session', '-t', actualTmuxName];
                     }
 
                     // Use terminal dimensions from client if provided, otherwise use defaults
