@@ -1365,7 +1365,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: existingSession.keepAlive || false,
                         tmuxSession: existingSession.dtachSocket ? tmuxName : null,
-                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket}` : null,
+                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r winch` : null,
                         reattached: false
                     }));
 
@@ -1392,7 +1392,7 @@ function handleShellConnection(ws) {
                     ].join(':');
                     const enhancedPath = `${userBinPaths}:${process.env.PATH || ''}`;
 
-                    shellProcess = pty.spawn('dtach', ['-a', dtachSocket, '-E', '-z'], {
+                    shellProcess = pty.spawn('dtach', ['-a', dtachSocket, '-E', '-z', '-r', 'winch'], {
                         name: 'xterm-256color',
                         cols: termCols,
                         rows: termRows,
@@ -1408,6 +1408,14 @@ function handleShellConnection(ws) {
                     });
 
                     console.log('[dtach] Reattach PTY started, PID:', shellProcess.pid);
+
+                    // Force resize after reattach so child process gets correct dimensions
+                    setTimeout(() => {
+                        if (shellProcess && shellProcess.resize) {
+                            shellProcess.resize(termCols, termRows);
+                            console.log(`[dtach] Forced resize after reattach: ${termCols}x${termRows}`);
+                        }
+                    }, 300);
 
                     // Restore keepAlive state from persistent set
                     const restoredKeepAlive = keepAliveSessions.has(dtachSocket);
@@ -1427,7 +1435,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: restoredKeepAlive,
                         tmuxSession: tmuxName,
-                        attachCommand: `dtach -a ${dtachSocket}`,
+                        attachCommand: `dtach -a ${dtachSocket} -r winch`,
                         reattached: true
                     }));
 
@@ -1619,6 +1627,16 @@ function handleShellConnection(ws) {
 
                     console.log('🟢 Shell process started with PTY, PID:', shellProcess.pid);
 
+                    // Force resize after dtach creates its internal PTY
+                    if (os.platform() !== 'win32') {
+                        setTimeout(() => {
+                            if (shellProcess && shellProcess.resize) {
+                                shellProcess.resize(termCols, termRows);
+                                console.log(`[dtach] Forced resize after create: ${termCols}x${termRows}`);
+                            }
+                        }, 300);
+                    }
+
                     ptySessionsMap.set(ptySessionKey, {
                         pty: shellProcess,
                         clients: new Set([ws]),  // Support multiple clients sharing the same terminal
@@ -1635,7 +1653,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: false,
                         tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
-                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket}` : null,
+                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r winch` : null,
                         reattached: false
                     }));
 

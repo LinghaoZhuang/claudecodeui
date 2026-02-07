@@ -92,6 +92,14 @@ export const authenticatedFetch = async (url, options = {}) => {
     return retryResponse;
   }
 
+  // Auto-logout on 401/403 (invalid or expired token)
+  if ((response.status === 401 || response.status === 403) && token) {
+    console.warn(`[API] Auth failed (${response.status}), clearing token and redirecting to login`);
+    localStorage.removeItem('auth-token');
+    window.location.href = '/login';
+    return response;
+  }
+
   return response;
 };
 
