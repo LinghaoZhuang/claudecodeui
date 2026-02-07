@@ -49,7 +49,7 @@ import os from 'os';
 import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, spawnSync } from 'child_process';
 import crypto from 'crypto';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
@@ -204,62 +204,55 @@ const ptySessionsMap = new Map();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const MAX_SHELLS_PER_TYPE = 3; // Max shells per type (plain / claude / cursor)
 
-// dtach session helpers
-const DTACH_SOCK_DIR = path.join(os.tmpdir(), 'ccui-dtach');
-try { fs.mkdirSync(DTACH_SOCK_DIR, { recursive: true }); } catch {}
+// tmux session helpers
+// Use a dedicated socket so ccui sessions are isolated from user's personal tmux
+const TMUX_SOCKET = 'ccui';
+const TMUX_CONF_PATH = path.join(os.tmpdir(), 'ccui-tmux.conf');
 
-function getDtachSocketPath(ptySessionKey) {
-    const hash = crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 12);
-    return path.join(DTACH_SOCK_DIR, `ccui_${hash}`);
+// Write tmux config optimized for xterm.js web terminal:
+// - mouse off: let xterm.js handle mouse wheel + mobile touch scrolling natively
+// - status off: web UI has its own controls, no need for tmux status bar
+// - smcup@/rmcup@: disable alternate screen so output flows into xterm.js scrollback buffer,
+//   enabling native scroll (mouse wheel, touch, scrollbar) to work as expected
+try {
+    fs.writeFileSync(TMUX_CONF_PATH, [
+        'set -g mouse off',
+        'set -g status off',
+        'set -g history-limit 50000',
+        'set -g escape-time 0',
+        'set -g default-terminal "xterm-256color"',
+        'set -g terminal-overrides "xterm-256color:smcup@:rmcup@"',
+        ''
+    ].join('\n'));
+} catch {}
+
+function getTmuxSessionName(ptySessionKey) {
+    return `cc_${crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 4)}`;
 }
 
-function getDtachSessionName(ptySessionKey) {
-    const hash = crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 12);
-    return `ccui_${hash}`;
-}
-
-function dtachSocketExists(socketPath) {
-    return fs.existsSync(socketPath);
-}
-
-function killDtachSession(socketPath) {
+function tmuxSessionExists(sessionName) {
     try {
-        // dtach doesn't have a kill command; remove the socket file
-        // which causes the dtach process to see the socket is gone.
-        // Also find and kill any process using this socket.
-        const sockFile = socketPath;
-        if (fs.existsSync(sockFile)) {
-            // Find dtach PID by socket
-            try {
-                const output = execSync(`fuser ${sockFile} 2>/dev/null`, { encoding: 'utf8' }).trim();
-                if (output) {
-                    const pids = output.split(/\s+/).filter(Boolean);
-                    for (const pid of pids) {
-                        try { process.kill(parseInt(pid), 'SIGTERM'); } catch {}
-                    }
-                }
-            } catch {}
-            try { fs.unlinkSync(sockFile); } catch {}
-        }
-        console.log(`[dtach] Killed session: ${socketPath}`);
-    } catch {
-        // Session may already be gone
-    }
+        execSync(`tmux -L ${TMUX_SOCKET} -f "${TMUX_CONF_PATH}" has-session -t ${sessionName} 2>/dev/null`);
+        return true;
+    } catch { return false; }
 }
 
-// List all ccui_* dtach socket files
-function listCcuiDtachSockets() {
+function killTmuxSession(sessionName) {
     try {
-        return fs.readdirSync(DTACH_SOCK_DIR)
-            .filter(f => f.startsWith('ccui_'))
-            .map(f => path.join(DTACH_SOCK_DIR, f));
-    } catch {
-        return [];
-    }
+        execSync(`tmux -L ${TMUX_SOCKET} kill-session -t ${sessionName} 2>/dev/null`);
+        console.log(`[tmux] Killed session: ${sessionName}`);
+    } catch {}
+}
+
+function listCcuiTmuxSessions() {
+    try {
+        const output = execSync(`tmux -L ${TMUX_SOCKET} list-sessions -F '#{session_name}' 2>/dev/null`, { encoding: 'utf8' });
+        return output.trim().split('\n').filter(s => s.startsWith('cc_'));
+    } catch { return []; }
 }
 
 // Persistent keepAlive state — survives ptySessionsMap cleanup within same process
-// Key: dtach socket path
+// Key: tmux session name
 const keepAliveSessions = new Set();
 
 // Periodic sweep: kill PTY sessions with no live clients that somehow missed timeout.
@@ -275,42 +268,42 @@ setInterval(() => {
         if (session.clients.size === 0 && !session.timeoutId) {
             console.log(`[PTY sweep] Cleaning orphaned session: ${key}`);
             if (session.pty && session.pty.kill) session.pty.kill();
-            if (!session.keepAlive && session.dtachSocket) {
-                killDtachSession(session.dtachSocket);
-                keepAliveSessions.delete(session.dtachSocket);
+            if (!session.keepAlive && session.tmuxSessionName) {
+                killTmuxSession(session.tmuxSessionName);
+                keepAliveSessions.delete(session.tmuxSessionName);
             }
             ptySessionsMap.delete(key);
         }
     }
 
-    // Also sweep orphaned dtach sockets not tracked by ptySessionsMap
-    const activeSocketPaths = new Set();
+    // Also sweep orphaned tmux sessions not tracked by ptySessionsMap
+    const activeTmuxNames = new Set();
     for (const [, session] of ptySessionsMap) {
-        if (session.dtachSocket) activeSocketPaths.add(session.dtachSocket);
+        if (session.tmuxSessionName) activeTmuxNames.add(session.tmuxSessionName);
     }
-    for (const sockPath of listCcuiDtachSockets()) {
-        if (!activeSocketPaths.has(sockPath) && !keepAliveSessions.has(sockPath)) {
-            console.log(`[PTY sweep] Killing orphaned dtach session: ${sockPath}`);
-            killDtachSession(sockPath);
+    for (const tmuxName of listCcuiTmuxSessions()) {
+        if (!activeTmuxNames.has(tmuxName) && !keepAliveSessions.has(tmuxName)) {
+            console.log(`[PTY sweep] Killing orphaned tmux session: ${tmuxName}`);
+            killTmuxSession(tmuxName);
         }
     }
 
-    // Clean up keepAliveSessions entries whose socket no longer exists
-    for (const sockPath of keepAliveSessions) {
-        if (!dtachSocketExists(sockPath)) {
-            console.log(`[PTY sweep] Removing stale keepAlive entry: ${sockPath}`);
-            keepAliveSessions.delete(sockPath);
+    // Clean up keepAliveSessions entries whose tmux session no longer exists
+    for (const tmuxName of keepAliveSessions) {
+        if (!tmuxSessionExists(tmuxName)) {
+            console.log(`[PTY sweep] Removing stale keepAlive entry: ${tmuxName}`);
+            keepAliveSessions.delete(tmuxName);
         }
     }
 }, 5 * 60 * 1000); // every 5 minutes
 
-// On startup: clean orphaned dtach sockets from previous runs
+// On startup: clean orphaned tmux sessions from previous runs
 setTimeout(() => {
-    const orphans = listCcuiDtachSockets();
+    const orphans = listCcuiTmuxSessions();
     if (orphans.length > 0) {
-        console.log(`[dtach startup] Found ${orphans.length} orphaned ccui_* socket(s), cleaning up...`);
-        for (const sockPath of orphans) {
-            killDtachSession(sockPath);
+        console.log(`[tmux startup] Found ${orphans.length} orphaned cc_* session(s), cleaning up...`);
+        for (const tmuxName of orphans) {
+            killTmuxSession(tmuxName);
         }
     }
 }, 3000);
@@ -1277,8 +1270,7 @@ function handleShellConnection(ws) {
                     : '';
                 const shellPrefix = isPlainShell ? 'plain_' : '';
                 ptySessionKey = `${shellPrefix}${projectPath}_${sessionId || 'default'}${commandSuffix}`;
-                const tmuxName = getDtachSessionName(ptySessionKey);
-                const dtachSocket = getDtachSocketPath(ptySessionKey);
+                const tmuxName = getTmuxSessionName(ptySessionKey);
 
                 // Kill any existing login session before starting fresh
                 if (isLoginCommand) {
@@ -1287,12 +1279,26 @@ function handleShellConnection(ws) {
                         console.log('🧹 Cleaning up existing login session:', ptySessionKey);
                         if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
                         if (oldSession.pty && oldSession.pty.kill) oldSession.pty.kill();
-                        if (oldSession.dtachSocket) killDtachSession(oldSession.dtachSocket);
+                        if (oldSession.tmuxSessionName) killTmuxSession(oldSession.tmuxSessionName);
                         ptySessionsMap.delete(ptySessionKey);
                     }
                 }
 
-                const existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+                // Re-key: if client has a real sessionId but no matching PTY session,
+                // check if there's a '_default' session for the same project (new session that hasn't been mapped yet)
+                let existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+                if (!existingSession && !isLoginCommand && sessionId && sessionId !== 'default') {
+                    const defaultKey = `${shellPrefix}${projectPath}_default${commandSuffix}`;
+                    const defaultSession = ptySessionsMap.get(defaultKey);
+                    if (defaultSession) {
+                        console.log(`🔀 Re-keying PTY session: ${defaultKey} → ${ptySessionKey}`);
+                        ptySessionsMap.delete(defaultKey);
+                        defaultSession.sessionId = sessionId;
+                        ptySessionsMap.set(ptySessionKey, defaultSession);
+                        existingSession = defaultSession;
+                    }
+                }
+
                 if (existingSession) {
                     console.log('♻️  Joining existing PTY session:', ptySessionKey);
                     shellProcess = existingSession.pty;
@@ -1364,32 +1370,35 @@ function handleShellConnection(ws) {
                     ws.send(JSON.stringify({
                         type: 'session_info',
                         keepAlive: existingSession.keepAlive || false,
-                        tmuxSession: existingSession.dtachSocket ? tmuxName : null,
-                        attachCommand: existingSession.dtachSocket ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${existingSession.dtachSocket} -r winch` : null,
+                        tmuxSession: existingSession.tmuxSessionName || null,
+                        attachCommand: existingSession.tmuxSessionName ? `tmux -L ${TMUX_SOCKET} attach-session -t ${existingSession.tmuxSessionName}` : null,
                         reattached: false
                     }));
-
-                    // Send show-cursor escape directly to this client
-                    setTimeout(() => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'output', data: '\x1b[?25h' }));
-                        }
-                    }, 500);
 
                     return;
                 }
 
-                // Check for orphaned dtach session (node-pty gone but dtach socket still alive)
-                const hasDtachSession = !isLoginCommand && dtachSocketExists(dtachSocket);
-                if (hasDtachSession) {
-                    console.log(`[dtach] Found orphaned dtach session ${tmuxName}, reattaching...`);
+                // Check for orphaned tmux session (node-pty gone but tmux session still alive)
+                // Also check default key's tmux session if sessionId is real
+                let effectiveTmuxName = tmuxName;
+                if (!isLoginCommand && sessionId && sessionId !== 'default' && !tmuxSessionExists(tmuxName)) {
+                    const defaultKey = `${shellPrefix}${projectPath}_default${commandSuffix}`;
+                    const defaultTmuxName = getTmuxSessionName(defaultKey);
+                    if (tmuxSessionExists(defaultTmuxName)) {
+                        effectiveTmuxName = defaultTmuxName;
+                        console.log(`[tmux] Found orphaned session under default key: ${defaultTmuxName}`);
+                    }
+                }
+                const hasTmuxSession = !isLoginCommand && tmuxSessionExists(effectiveTmuxName);
+                if (hasTmuxSession) {
+                    console.log(`[tmux] Found orphaned tmux session ${effectiveTmuxName}, reattaching...`);
 
                     const termCols = data.cols || 80;
                     const termRows = data.rows || 24;
 
                     ws.send(JSON.stringify({
                         type: 'output',
-                        data: `\x1b[36m[Reattaching to session: ${tmuxName}]\x1b[0m\r\n`
+                        data: `\x1b[36m[Reattaching to session: ${effectiveTmuxName}]\x1b[0m\r\n`
                     }));
 
                     const userBinPaths = [
@@ -1399,7 +1408,7 @@ function handleShellConnection(ws) {
                     ].join(':');
                     const enhancedPath = `${userBinPaths}:${process.env.PATH || ''}`;
 
-                    shellProcess = pty.spawn('dtach', ['-a', dtachSocket, '-E', '-z', '-r', 'winch'], {
+                    shellProcess = pty.spawn('tmux', ['-L', TMUX_SOCKET, 'attach-session', '-t', effectiveTmuxName], {
                         name: 'xterm-256color',
                         cols: termCols,
                         rows: termRows,
@@ -1414,25 +1423,10 @@ function handleShellConnection(ws) {
                         }
                     });
 
-                    console.log('[dtach] Reattach PTY started, PID:', shellProcess.pid);
-
-                    // Force resize after reattach so child process gets correct dimensions
-                    // Then send Ctrl+L to trigger TUI full redraw (Claude CLI etc.)
-                    setTimeout(() => {
-                        if (shellProcess && shellProcess.resize) {
-                            shellProcess.resize(termCols, termRows);
-                            console.log(`[dtach] Forced resize after reattach: ${termCols}x${termRows}`);
-                        }
-                        setTimeout(() => {
-                            if (shellProcess && shellProcess.write) {
-                                shellProcess.write('\x0c');
-                                console.log('[dtach] Sent Ctrl+L for TUI redraw');
-                            }
-                        }, 200);
-                    }, 300);
+                    console.log('[tmux] Reattach PTY started, PID:', shellProcess.pid);
 
                     // Restore keepAlive state from persistent set
-                    const restoredKeepAlive = keepAliveSessions.has(dtachSocket);
+                    const restoredKeepAlive = keepAliveSessions.has(effectiveTmuxName);
 
                     ptySessionsMap.set(ptySessionKey, {
                         pty: shellProcess,
@@ -1441,24 +1435,17 @@ function handleShellConnection(ws) {
                         timeoutId: null,
                         projectPath,
                         sessionId,
-                        dtachSocket,
+                        tmuxSessionName: effectiveTmuxName,
                         keepAlive: restoredKeepAlive
                     });
 
                     ws.send(JSON.stringify({
                         type: 'session_info',
                         keepAlive: restoredKeepAlive,
-                        tmuxSession: tmuxName,
-                        attachCommand: `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${dtachSocket} -r winch`,
+                        tmuxSession: effectiveTmuxName,
+                        attachCommand: `tmux -L ${TMUX_SOCKET} attach-session -t ${effectiveTmuxName}`,
                         reattached: true
                     }));
-
-                    // Send show-cursor escape directly to web client (dtach doesn't restore terminal state)
-                    setTimeout(() => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'output', data: '\x1b[?25h' }));
-                        }
-                    }, 800);
 
                     // Wire up data/exit handlers (same as new session below)
                     shellProcess.onData((data) => {
@@ -1478,7 +1465,7 @@ function handleShellConnection(ws) {
                     });
 
                     shellProcess.onExit(({ exitCode }) => {
-                        console.log(`[dtach] Reattached PTY exited with code ${exitCode}`);
+                        console.log(`[tmux] Reattached PTY exited with code ${exitCode}`);
                         const session = ptySessionsMap.get(ptySessionKey);
                         if (session) {
                             session.clients.forEach(client => {
@@ -1531,7 +1518,7 @@ function handleShellConnection(ws) {
                             }
                         });
                         if (session.pty && session.pty.kill) session.pty.kill();
-                        if (session.dtachSocket) killDtachSession(session.dtachSocket);
+                        if (session.tmuxSessionName) killTmuxSession(session.tmuxSessionName);
                         ptySessionsMap.delete(key);
                     }
                 }
@@ -1605,16 +1592,30 @@ function handleShellConnection(ws) {
                     console.log('🔧 Executing shell command:', shellCommand);
 
                     // Use appropriate shell based on platform
-                    // On Linux/macOS: wrap in dtach for session persistence
-                    // dtach -A: attach or create. -E: disable detach char. -z: disable suspend
+                    // On Linux/macOS: create detached tmux session then attach via node-pty
                     let shell, shellArgs;
                     if (os.platform() === 'win32') {
                         shell = 'powershell.exe';
                         shellArgs = ['-Command', shellCommand];
                     } else {
-                        shell = 'dtach';
-                        shellArgs = ['-A', dtachSocket, '-E', '-z', 'bash', '-l', '-c', shellCommand];
-                        console.log(`[dtach] Creating session ${tmuxName} at ${dtachSocket}`);
+                        // Create detached tmux session running the command
+                        // tmux shell-command is passed to /bin/sh -c, so wrap in bash -l -c for login shell env
+                        const escapedForShell = shellCommand.replace(/'/g, "'\\''");
+                        const wrappedCommand = `bash -l -c '${escapedForShell}'`;
+                        const tmuxResult = spawnSync('tmux', [
+                            '-L', TMUX_SOCKET, '-f', TMUX_CONF_PATH,
+                            'new-session', '-d',
+                            '-s', tmuxName,
+                            '-x', String(data.cols || 80),
+                            '-y', String(data.rows || 24),
+                            wrappedCommand
+                        ], { stdio: 'pipe' });
+                        if (tmuxResult.status !== 0) {
+                            throw new Error(`tmux new-session failed: ${(tmuxResult.stderr || '').toString().trim()}`);
+                        }
+                        console.log(`[tmux] Created detached session ${tmuxName}`);
+                        shell = 'tmux';
+                        shellArgs = ['-L', TMUX_SOCKET, 'attach-session', '-t', tmuxName];
                     }
 
                     // Use terminal dimensions from client if provided, otherwise use defaults
@@ -1648,16 +1649,6 @@ function handleShellConnection(ws) {
 
                     console.log('🟢 Shell process started with PTY, PID:', shellProcess.pid);
 
-                    // Force resize after dtach creates its internal PTY
-                    if (os.platform() !== 'win32') {
-                        setTimeout(() => {
-                            if (shellProcess && shellProcess.resize) {
-                                shellProcess.resize(termCols, termRows);
-                                console.log(`[dtach] Forced resize after create: ${termCols}x${termRows}`);
-                            }
-                        }, 300);
-                    }
-
                     ptySessionsMap.set(ptySessionKey, {
                         pty: shellProcess,
                         clients: new Set([ws]),  // Support multiple clients sharing the same terminal
@@ -1665,7 +1656,7 @@ function handleShellConnection(ws) {
                         timeoutId: null,
                         projectPath,
                         sessionId,
-                        dtachSocket: os.platform() !== 'win32' ? dtachSocket : null,
+                        tmuxSessionName: os.platform() !== 'win32' ? tmuxName : null,
                         keepAlive: false
                     });
 
@@ -1674,7 +1665,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: false,
                         tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
-                        attachCommand: os.platform() !== 'win32' ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${dtachSocket} -r winch` : null,
+                        attachCommand: os.platform() !== 'win32' ? `tmux -L ${TMUX_SOCKET} attach-session -t ${tmuxName}` : null,
                         reattached: false
                     }));
 
@@ -1815,10 +1806,10 @@ function handleShellConnection(ws) {
                             session.pty.kill();
                         }
 
-                        // Kill the dtach session too
-                        if (session.dtachSocket) {
-                            killDtachSession(session.dtachSocket);
-                            keepAliveSessions.delete(session.dtachSocket);
+                        // Kill the tmux session too
+                        if (session.tmuxSessionName) {
+                            killTmuxSession(session.tmuxSessionName);
+                            keepAliveSessions.delete(session.tmuxSessionName);
                         }
 
                         // Remove from map
@@ -1836,10 +1827,10 @@ function handleShellConnection(ws) {
                         console.log(`[keepAlive] Session ${ptySessionKey}: keepAlive=${session.keepAlive}`);
 
                         // Persist keepAlive state in the dedicated set
-                        if (session.keepAlive && session.dtachSocket) {
-                            keepAliveSessions.add(session.dtachSocket);
-                        } else if (session.dtachSocket) {
-                            keepAliveSessions.delete(session.dtachSocket);
+                        if (session.keepAlive && session.tmuxSessionName) {
+                            keepAliveSessions.add(session.tmuxSessionName);
+                        } else if (session.tmuxSessionName) {
+                            keepAliveSessions.delete(session.tmuxSessionName);
                         }
 
                         // Broadcast updated session_info to all clients
@@ -1848,8 +1839,8 @@ function handleShellConnection(ws) {
                                 client.send(JSON.stringify({
                                     type: 'session_info',
                                     keepAlive: session.keepAlive,
-                                    tmuxSession: session.dtachSocket ? getDtachSessionName(ptySessionKey) : null,
-                                    attachCommand: session.dtachSocket ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${session.dtachSocket} -r winch` : null,
+                                    tmuxSession: session.tmuxSessionName || null,
+                                    attachCommand: session.tmuxSessionName ? `tmux -L ${TMUX_SOCKET} attach-session -t ${session.tmuxSessionName}` : null,
                                     reattached: false
                                 }));
                             }
@@ -1895,14 +1886,14 @@ function handleShellConnection(ws) {
                 // Only set timeout if no clients are connected
                 if (remainingClients === 0) {
                     if (session.keepAlive) {
-                        // keepAlive ON: release node-pty immediately, keep dtach session alive
-                        console.log(`📌 keepAlive ON, releasing node-pty but preserving dtach session: ${session.dtachSocket}`);
+                        // keepAlive ON: release node-pty immediately, keep tmux session alive
+                        console.log(`📌 keepAlive ON, releasing node-pty but preserving tmux session: ${session.tmuxSessionName}`);
                         if (session.pty && session.pty.kill) {
                             session.pty.kill();
                         }
                         ptySessionsMap.delete(ptySessionKey);
                     } else {
-                        // keepAlive OFF: 30-minute timeout, then kill both node-pty and dtach
+                        // keepAlive OFF: 30-minute timeout, then kill both node-pty and tmux
                         console.log('⏳ No clients left, PTY session will timeout in 30 minutes:', ptySessionKey);
 
                         session.timeoutId = setTimeout(() => {
@@ -1910,8 +1901,8 @@ function handleShellConnection(ws) {
                             if (session.pty && session.pty.kill) {
                                 session.pty.kill();
                             }
-                            if (session.dtachSocket) {
-                                killDtachSession(session.dtachSocket);
+                            if (session.tmuxSessionName) {
+                                killTmuxSession(session.tmuxSessionName);
                             }
                             ptySessionsMap.delete(ptySessionKey);
                         }, PTY_SESSION_TIMEOUT);
