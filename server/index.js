@@ -1365,9 +1365,16 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: existingSession.keepAlive || false,
                         tmuxSession: existingSession.dtachSocket ? tmuxName : null,
-                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r winch` : null,
+                        attachCommand: existingSession.dtachSocket ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${existingSession.dtachSocket} -r winch` : null,
                         reattached: false
                     }));
+
+                    // Send show-cursor escape directly to this client
+                    setTimeout(() => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'output', data: '\x1b[?25h' }));
+                        }
+                    }, 500);
 
                     return;
                 }
@@ -1442,9 +1449,16 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: restoredKeepAlive,
                         tmuxSession: tmuxName,
-                        attachCommand: `dtach -a ${dtachSocket} -r winch`,
+                        attachCommand: `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${dtachSocket} -r winch`,
                         reattached: true
                     }));
+
+                    // Send show-cursor escape directly to web client (dtach doesn't restore terminal state)
+                    setTimeout(() => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'output', data: '\x1b[?25h' }));
+                        }
+                    }, 800);
 
                     // Wire up data/exit handlers (same as new session below)
                     shellProcess.onData((data) => {
@@ -1660,7 +1674,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: false,
                         tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
-                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r winch` : null,
+                        attachCommand: os.platform() !== 'win32' ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${dtachSocket} -r winch` : null,
                         reattached: false
                     }));
 
@@ -1835,7 +1849,7 @@ function handleShellConnection(ws) {
                                     type: 'session_info',
                                     keepAlive: session.keepAlive,
                                     tmuxSession: session.dtachSocket ? getDtachSessionName(ptySessionKey) : null,
-                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket} -r winch` : null,
+                                    attachCommand: session.dtachSocket ? `(sleep 0.5 && printf '\\e[?25h' > /dev/tty) & dtach -a ${session.dtachSocket} -r winch` : null,
                                     reattached: false
                                 }));
                             }
