@@ -252,7 +252,11 @@ class TunnelClient {
       const localWsUrl = `ws://localhost:${this.localPort}${wsPath}${tokenParam}`;
 
       console.log(`[TunnelClient] Opening local WebSocket tunnel: ${tunnelId} (${channel})`);
-      const localWs = new WebSocket(localWsUrl);
+      const localWs = new WebSocket(localWsUrl, {
+        headers: {
+          'x-cluster-internal-auth': this.secret
+        }
+      });
 
       localWs.on('open', () => {
         this.localTunnels.set(tunnelId, localWs);

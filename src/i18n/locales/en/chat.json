@@ -195,7 +195,13 @@
       "restart": "Restart",
       "restartTitle": "Kill and restart the terminal process",
       "connect": "Continue in Shell",
-      "connectTitle": "Connect to shell"
+      "connectTitle": "Connect to shell",
+      "keepAlive": "Keep Alive",
+      "keepAliveTitle": "Keep tmux session alive after disconnect (persist beyond 30min timeout)",
+      "keepAliveOff": "Pinned",
+      "keepAliveOffTitle": "Disable keep alive (session will timeout after 30min with no clients)",
+      "copyAttach": "Copy attach command",
+      "copied": "Copied"
     },
     "loading": "Loading terminal...",
     "connecting": "Connecting to shell...",

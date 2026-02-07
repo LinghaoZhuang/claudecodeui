@@ -49,7 +49,8 @@ import os from 'os';
 import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
+import crypto from 'crypto';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
@@ -202,6 +203,64 @@ const ptySessionsMap = new Map();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const MAX_SHELLS_PER_TYPE = 3; // Max shells per type (plain / claude / cursor)
 
+// dtach session helpers
+const DTACH_SOCK_DIR = path.join(os.tmpdir(), 'ccui-dtach');
+try { fs.mkdirSync(DTACH_SOCK_DIR, { recursive: true }); } catch {}
+
+function getDtachSocketPath(ptySessionKey) {
+    const hash = crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 12);
+    return path.join(DTACH_SOCK_DIR, `ccui_${hash}`);
+}
+
+function getDtachSessionName(ptySessionKey) {
+    const hash = crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 12);
+    return `ccui_${hash}`;
+}
+
+function dtachSocketExists(socketPath) {
+    return fs.existsSync(socketPath);
+}
+
+function killDtachSession(socketPath) {
+    try {
+        // dtach doesn't have a kill command; remove the socket file
+        // which causes the dtach process to see the socket is gone.
+        // Also find and kill any process using this socket.
+        const sockFile = socketPath;
+        if (fs.existsSync(sockFile)) {
+            // Find dtach PID by socket
+            try {
+                const output = execSync(`fuser ${sockFile} 2>/dev/null`, { encoding: 'utf8' }).trim();
+                if (output) {
+                    const pids = output.split(/\s+/).filter(Boolean);
+                    for (const pid of pids) {
+                        try { process.kill(parseInt(pid), 'SIGTERM'); } catch {}
+                    }
+                }
+            } catch {}
+            try { fs.unlinkSync(sockFile); } catch {}
+        }
+        console.log(`[dtach] Killed session: ${socketPath}`);
+    } catch {
+        // Session may already be gone
+    }
+}
+
+// List all ccui_* dtach socket files
+function listCcuiDtachSockets() {
+    try {
+        return fs.readdirSync(DTACH_SOCK_DIR)
+            .filter(f => f.startsWith('ccui_'))
+            .map(f => path.join(DTACH_SOCK_DIR, f));
+    } catch {
+        return [];
+    }
+}
+
+// Persistent keepAlive state — survives ptySessionsMap cleanup within same process
+// Key: dtach socket path
+const keepAliveSessions = new Set();
+
 // Periodic sweep: kill PTY sessions with no live clients that somehow missed timeout.
 setInterval(() => {
     for (const [key, session] of ptySessionsMap) {
@@ -215,10 +274,45 @@ setInterval(() => {
         if (session.clients.size === 0 && !session.timeoutId) {
             console.log(`[PTY sweep] Cleaning orphaned session: ${key}`);
             if (session.pty && session.pty.kill) session.pty.kill();
+            if (!session.keepAlive && session.dtachSocket) {
+                killDtachSession(session.dtachSocket);
+                keepAliveSessions.delete(session.dtachSocket);
+            }
             ptySessionsMap.delete(key);
         }
     }
+
+    // Also sweep orphaned dtach sockets not tracked by ptySessionsMap
+    const activeSocketPaths = new Set();
+    for (const [, session] of ptySessionsMap) {
+        if (session.dtachSocket) activeSocketPaths.add(session.dtachSocket);
+    }
+    for (const sockPath of listCcuiDtachSockets()) {
+        if (!activeSocketPaths.has(sockPath) && !keepAliveSessions.has(sockPath)) {
+            console.log(`[PTY sweep] Killing orphaned dtach session: ${sockPath}`);
+            killDtachSession(sockPath);
+        }
+    }
+
+    // Clean up keepAliveSessions entries whose socket no longer exists
+    for (const sockPath of keepAliveSessions) {
+        if (!dtachSocketExists(sockPath)) {
+            console.log(`[PTY sweep] Removing stale keepAlive entry: ${sockPath}`);
+            keepAliveSessions.delete(sockPath);
+        }
+    }
 }, 5 * 60 * 1000); // every 5 minutes
+
+// On startup: clean orphaned dtach sockets from previous runs
+setTimeout(() => {
+    const orphans = listCcuiDtachSockets();
+    if (orphans.length > 0) {
+        console.log(`[dtach startup] Found ${orphans.length} orphaned ccui_* socket(s), cleaning up...`);
+        for (const sockPath of orphans) {
+            killDtachSession(sockPath);
+        }
+    }
+}, 3000);
 
 // Single WebSocket server that handles both paths
 const wss = new WebSocketServer({
@@ -249,6 +343,18 @@ const wss = new WebSocketServer({
         }
 
         // Normal mode: verify token
+        // Check for cluster internal auth header (slave tunnel connections)
+        const clusterInternalAuth = info.req.headers['x-cluster-internal-auth'];
+        const clusterSecret = process.env.CLUSTER_SECRET;
+        if (clusterInternalAuth && clusterSecret && clusterInternalAuth === clusterSecret) {
+            const user = authenticateWebSocket(null); // Get first user
+            if (user) {
+                info.req.user = user;
+                console.log('[OK] WebSocket authenticated via cluster internal auth');
+                return true;
+            }
+        }
+
         // Extract token from query parameters or headers
         const token = url.searchParams.get('token') ||
             info.req.headers.authorization?.split(' ')[1];
@@ -1162,6 +1268,8 @@ function handleShellConnection(ws) {
                     : '';
                 const shellPrefix = isPlainShell ? 'plain_' : '';
                 ptySessionKey = `${shellPrefix}${projectPath}_${sessionId || 'default'}${commandSuffix}`;
+                const tmuxName = getDtachSessionName(ptySessionKey);
+                const dtachSocket = getDtachSocketPath(ptySessionKey);
 
                 // Kill any existing login session before starting fresh
                 if (isLoginCommand) {
@@ -1170,6 +1278,7 @@ function handleShellConnection(ws) {
                         console.log('🧹 Cleaning up existing login session:', ptySessionKey);
                         if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
                         if (oldSession.pty && oldSession.pty.kill) oldSession.pty.kill();
+                        if (oldSession.dtachSocket) killDtachSession(oldSession.dtachSocket);
                         ptySessionsMap.delete(ptySessionKey);
                     }
                 }
@@ -1242,6 +1351,107 @@ function handleShellConnection(ws) {
                     // Add new client to the set
                     existingSession.clients.add(ws);
 
+                    // Send session info (keepAlive status)
+                    ws.send(JSON.stringify({
+                        type: 'session_info',
+                        keepAlive: existingSession.keepAlive || false,
+                        tmuxSession: existingSession.dtachSocket ? tmuxName : null,
+                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket}` : null,
+                        reattached: false
+                    }));
+
+                    return;
+                }
+
+                // Check for orphaned dtach session (node-pty gone but dtach socket still alive)
+                const hasDtachSession = !isLoginCommand && dtachSocketExists(dtachSocket);
+                if (hasDtachSession) {
+                    console.log(`[dtach] Found orphaned dtach session ${tmuxName}, reattaching...`);
+
+                    const termCols = data.cols || 80;
+                    const termRows = data.rows || 24;
+
+                    ws.send(JSON.stringify({
+                        type: 'output',
+                        data: `\x1b[36m[Reattaching to session: ${tmuxName}]\x1b[0m\r\n`
+                    }));
+
+                    const userBinPaths = [
+                        path.join(os.homedir(), '.local', 'bin'),
+                        path.join(os.homedir(), 'bin'),
+                        '/usr/local/bin'
+                    ].join(':');
+                    const enhancedPath = `${userBinPaths}:${process.env.PATH || ''}`;
+
+                    shellProcess = pty.spawn('dtach', ['-a', dtachSocket, '-E', '-z'], {
+                        name: 'xterm-256color',
+                        cols: termCols,
+                        rows: termRows,
+                        cwd: os.homedir(),
+                        env: {
+                            ...process.env,
+                            PATH: enhancedPath,
+                            TERM: 'xterm-256color',
+                            COLORTERM: 'truecolor',
+                            FORCE_COLOR: '3',
+                            BROWSER: 'echo "OPEN_URL:"'
+                        }
+                    });
+
+                    console.log('[dtach] Reattach PTY started, PID:', shellProcess.pid);
+
+                    // Restore keepAlive state from persistent set
+                    const restoredKeepAlive = keepAliveSessions.has(dtachSocket);
+
+                    ptySessionsMap.set(ptySessionKey, {
+                        pty: shellProcess,
+                        clients: new Set([ws]),
+                        buffer: [],
+                        timeoutId: null,
+                        projectPath,
+                        sessionId,
+                        dtachSocket,
+                        keepAlive: restoredKeepAlive
+                    });
+
+                    ws.send(JSON.stringify({
+                        type: 'session_info',
+                        keepAlive: restoredKeepAlive,
+                        tmuxSession: tmuxName,
+                        attachCommand: `dtach -a ${dtachSocket}`,
+                        reattached: true
+                    }));
+
+                    // Wire up data/exit handlers (same as new session below)
+                    shellProcess.onData((data) => {
+                        const session = ptySessionsMap.get(ptySessionKey);
+                        if (!session) return;
+                        if (session.buffer.length < 5000) {
+                            session.buffer.push(data);
+                        } else {
+                            session.buffer.shift();
+                            session.buffer.push(data);
+                        }
+                        session.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({ type: 'output', data }));
+                            }
+                        });
+                    });
+
+                    shellProcess.onExit(({ exitCode }) => {
+                        console.log(`[dtach] Reattached PTY exited with code ${exitCode}`);
+                        const session = ptySessionsMap.get(ptySessionKey);
+                        if (session) {
+                            session.clients.forEach(client => {
+                                if (client.readyState === WebSocket.OPEN) {
+                                    client.send(JSON.stringify({ type: 'exit', code: exitCode }));
+                                }
+                            });
+                            ptySessionsMap.delete(ptySessionKey);
+                        }
+                    });
+
                     return;
                 }
 
@@ -1283,6 +1493,7 @@ function handleShellConnection(ws) {
                             }
                         });
                         if (session.pty && session.pty.kill) session.pty.kill();
+                        if (session.dtachSocket) killDtachSession(session.dtachSocket);
                         ptySessionsMap.delete(key);
                     }
                 }
@@ -1356,9 +1567,17 @@ function handleShellConnection(ws) {
                     console.log('🔧 Executing shell command:', shellCommand);
 
                     // Use appropriate shell based on platform
-                    // Use login shell (-l) to load user's environment (.bashrc, .profile, etc.)
-                    const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
-                    const shellArgs = os.platform() === 'win32' ? ['-Command', shellCommand] : ['-l', '-c', shellCommand];
+                    // On Linux/macOS: wrap in dtach for session persistence
+                    // dtach -A: attach or create. -E: disable detach char. -z: disable suspend
+                    let shell, shellArgs;
+                    if (os.platform() === 'win32') {
+                        shell = 'powershell.exe';
+                        shellArgs = ['-Command', shellCommand];
+                    } else {
+                        shell = 'dtach';
+                        shellArgs = ['-A', dtachSocket, '-E', '-z', 'bash', '-l', '-c', shellCommand];
+                        console.log(`[dtach] Creating session ${tmuxName} at ${dtachSocket}`);
+                    }
 
                     // Use terminal dimensions from client if provided, otherwise use defaults
                     const termCols = data.cols || 80;
@@ -1397,8 +1616,19 @@ function handleShellConnection(ws) {
                         buffer: [],
                         timeoutId: null,
                         projectPath,
-                        sessionId
+                        sessionId,
+                        dtachSocket: os.platform() !== 'win32' ? dtachSocket : null,
+                        keepAlive: false
                     });
+
+                    // Send session info to client
+                    ws.send(JSON.stringify({
+                        type: 'session_info',
+                        keepAlive: false,
+                        tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
+                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket}` : null,
+                        reattached: false
+                    }));
 
                     // Handle data output - broadcast to all connected clients
                     shellProcess.onData((data) => {
@@ -1537,10 +1767,45 @@ function handleShellConnection(ws) {
                             session.pty.kill();
                         }
 
+                        // Kill the dtach session too
+                        if (session.dtachSocket) {
+                            killDtachSession(session.dtachSocket);
+                            keepAliveSessions.delete(session.dtachSocket);
+                        }
+
                         // Remove from map
                         ptySessionsMap.delete(ptySessionKey);
                         shellProcess = null;
                         console.log('💀 PTY session killed:', ptySessionKey);
+                    }
+                }
+            } else if (data.type === 'keepalive') {
+                // Toggle keepAlive for this session
+                if (ptySessionKey) {
+                    const session = ptySessionsMap.get(ptySessionKey);
+                    if (session) {
+                        session.keepAlive = !!data.enabled;
+                        console.log(`[keepAlive] Session ${ptySessionKey}: keepAlive=${session.keepAlive}`);
+
+                        // Persist keepAlive state in the dedicated set
+                        if (session.keepAlive && session.dtachSocket) {
+                            keepAliveSessions.add(session.dtachSocket);
+                        } else if (session.dtachSocket) {
+                            keepAliveSessions.delete(session.dtachSocket);
+                        }
+
+                        // Broadcast updated session_info to all clients
+                        session.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: 'session_info',
+                                    keepAlive: session.keepAlive,
+                                    tmuxSession: session.dtachSocket ? getDtachSessionName(ptySessionKey) : null,
+                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket}` : null,
+                                    reattached: false
+                                }));
+                            }
+                        });
                     }
                 }
             }
@@ -1581,15 +1846,28 @@ function handleShellConnection(ws) {
 
                 // Only set timeout if no clients are connected
                 if (remainingClients === 0) {
-                    console.log('⏳ No clients left, PTY session will timeout in 30 minutes:', ptySessionKey);
-
-                    session.timeoutId = setTimeout(() => {
-                        console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
+                    if (session.keepAlive) {
+                        // keepAlive ON: release node-pty immediately, keep dtach session alive
+                        console.log(`📌 keepAlive ON, releasing node-pty but preserving dtach session: ${session.dtachSocket}`);
                         if (session.pty && session.pty.kill) {
                             session.pty.kill();
                         }
                         ptySessionsMap.delete(ptySessionKey);
-                    }, PTY_SESSION_TIMEOUT);
+                    } else {
+                        // keepAlive OFF: 30-minute timeout, then kill both node-pty and dtach
+                        console.log('⏳ No clients left, PTY session will timeout in 30 minutes:', ptySessionKey);
+
+                        session.timeoutId = setTimeout(() => {
+                            console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
+                            if (session.pty && session.pty.kill) {
+                                session.pty.kill();
+                            }
+                            if (session.dtachSocket) {
+                                killDtachSession(session.dtachSocket);
+                            }
+                            ptySessionsMap.delete(ptySessionKey);
+                        }, PTY_SESSION_TIMEOUT);
+                    }
                 }
             }
         }

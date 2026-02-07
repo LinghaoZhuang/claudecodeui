@@ -195,7 +195,13 @@
       "restart": "重启",
       "restartTitle": "杀死并重启终端进程",
       "connect": "在 Shell 中继续",
-      "connectTitle": "连接到 Shell"
+      "connectTitle": "连接到 Shell",
+      "keepAlive": "保活",
+      "keepAliveTitle": "断开后保持 tmux 会话存活（超过30分钟不自动销毁）",
+      "keepAliveOff": "已固定",
+      "keepAliveOffTitle": "取消保活（无客户端连接30分钟后会话将超时销毁）",
+      "copyAttach": "复制连接命令",
+      "copied": "已复制"
     },
     "loading": "正在加载终端...",
     "connecting": "正在连接到 Shell...",

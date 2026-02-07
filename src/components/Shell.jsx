@@ -56,6 +56,11 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isKeepAlive, setIsKeepAlive] = useState(false);
+  const [tmuxSession, setTmuxSession] = useState(null);
+  const [attachCommand, setAttachCommand] = useState(null);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const actionsMenuRef = useRef(null);
   const isConnectingRef = useRef(false);
   const isConnectedRef = useRef(false);
   const forceResizeRef = useRef(false);  // Force resize PTY on reconnect
@@ -172,6 +177,10 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
             }
           } else if (data.type === 'url_open') {
             window.open(data.url, '_blank');
+          } else if (data.type === 'session_info') {
+            setIsKeepAlive(data.keepAlive || false);
+            setTmuxSession(data.tmuxSession || null);
+            setAttachCommand(data.attachCommand || null);
           }
         } catch (error) {
           console.error('[Shell] Error handling WebSocket message:', error, event.data);
@@ -289,11 +298,49 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
     setIsConnected(false);
     setIsInitialized(false);
+    setIsKeepAlive(false);
+    setTmuxSession(null);
+    setAttachCommand(null);
 
     setTimeout(() => {
       setIsRestarting(false);
     }, 200);
   };
+
+  const toggleKeepAlive = () => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'keepalive',
+        enabled: !isKeepAlive
+      }));
+    }
+  };
+
+  const [copySuccess, setCopySuccess] = useState(false);
+  const copyAttachCommand = () => {
+    if (attachCommand) {
+      navigator.clipboard.writeText(attachCommand).then(() => {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 1500);
+      }).catch(() => {});
+    }
+  };
+
+  // Close actions menu when clicking outside
+  useEffect(() => {
+    if (!showActionsMenu) return;
+    const handleClick = (e) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target)) {
+        setShowActionsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('touchstart', handleClick);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('touchstart', handleClick);
+    };
+  }, [showActionsMenu]);
 
   // Terminal connection persists across session/project changes
   // User can manually restart if needed
@@ -511,32 +558,79 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
             {isRestarting && (
               <span className="text-xs text-blue-400">{t('shell.status.restarting')}</span>
             )}
+            {tmuxSession && isConnected && (
+              <span className="text-xs text-gray-500" title={tmuxSession}>
+                [{tmuxSession}]
+              </span>
+            )}
           </div>
           <div className="flex items-center space-x-3">
-            {isConnected && (
+            <div className="relative" ref={actionsMenuRef}>
               <button
-                onClick={reconnectShell}
-                className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center space-x-1"
-                title={t('shell.actions.reconnectTitle')}
+                onClick={() => setShowActionsMenu(!showActionsMenu)}
+                className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700 rounded flex items-center space-x-1"
               >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                {isKeepAlive && (
+                  <svg className="w-3 h-3 text-yellow-400" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                )}
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                 </svg>
-                <span>{t('shell.actions.reconnect')}</span>
               </button>
-            )}
 
-            <button
-              onClick={restartShell}
-              disabled={isRestarting}
-              className="text-xs text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
-              title={t('shell.actions.restartTitle')}
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span>{t('shell.actions.restart')}</span>
-            </button>
+              {showActionsMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[160px]">
+                  {isConnected && (
+                    <button
+                      onClick={() => { reconnectShell(); setShowActionsMenu(false); }}
+                      className="w-full px-3 py-2 text-xs text-left text-gray-300 hover:bg-gray-700 hover:text-white flex items-center space-x-2"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>{t('shell.actions.reconnect')}</span>
+                    </button>
+                  )}
+
+                  {isConnected && (
+                    <button
+                      onClick={() => { toggleKeepAlive(); setShowActionsMenu(false); }}
+                      className={`w-full px-3 py-2 text-xs text-left flex items-center space-x-2 ${isKeepAlive ? 'text-yellow-400 hover:bg-gray-700' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
+                    >
+                      <svg className="w-3.5 h-3.5" fill={isKeepAlive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      <span>{isKeepAlive ? t('shell.actions.keepAliveOff') : t('shell.actions.keepAlive')}</span>
+                    </button>
+                  )}
+
+                  {isConnected && attachCommand && (
+                    <button
+                      onClick={() => { copyAttachCommand(); setShowActionsMenu(false); }}
+                      className="w-full px-3 py-2 text-xs text-left text-gray-300 hover:bg-gray-700 hover:text-white flex items-center space-x-2"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      <span>{copySuccess ? t('shell.actions.copied') : t('shell.actions.copyAttach')}</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => { restartShell(); setShowActionsMenu(false); }}
+                    disabled={isRestarting}
+                    className="w-full px-3 py-2 text-xs text-left text-red-400 hover:bg-gray-700 hover:text-red-300 disabled:opacity-50 flex items-center space-x-2"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>{t('shell.actions.restart')}</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
