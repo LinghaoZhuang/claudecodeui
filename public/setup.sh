@@ -280,11 +280,12 @@ step_install_ccui() {
         fi
     fi
 
-    local target="/usr/local/bin/ccui"
+    local target="$HOME/.local/bin/ccui"
+    mkdir -p "$HOME/.local/bin"
     info "安装 ccui 到 $target ..."
 
     # Embed the ccui script directly (self-contained, no network dependency)
-    sudo tee "$target" > /dev/null << 'CCUI_SCRIPT'
+    cat > "$target" << 'CCUI_SCRIPT'
 #!/usr/bin/env bash
 # ccui - Start or attach to a Claude Code UI tmux session
 # Usage:
@@ -336,8 +337,23 @@ else
 fi
 CCUI_SCRIPT
 
-    sudo chmod +x "$target"
+    chmod +x "$target"
     success "ccui 安装完成"
+
+    # Ensure ~/.local/bin is in PATH
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$HOME/.local/bin"; then
+        warn "\$PATH 中未包含 ~/.local/bin"
+        local shell_rc=""
+        [ -f "$HOME/.zshrc" ]    && shell_rc="$HOME/.zshrc"
+        [ -f "$HOME/.bashrc" ]   && shell_rc="$HOME/.bashrc"
+        if [ -n "$shell_rc" ] && ! grep -q '\.local/bin' "$shell_rc" 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_rc"
+            success "已添加到 $shell_rc，重新登录或执行: source $shell_rc"
+        else
+            info "请手动添加到 shell 配置: export PATH=\"\$HOME/.local/bin:\$PATH\""
+        fi
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
 
     echo ""
     info "使用方法:"
