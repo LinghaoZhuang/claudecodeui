@@ -214,8 +214,6 @@ const TMUX_CONF_PATH = path.join(os.tmpdir(), 'ccui-tmux.conf');
 // - status off: web UI has its own controls, no need for tmux status bar
 // - smcup@/rmcup@: disable alternate screen so output flows into xterm.js scrollback buffer,
 //   enabling native scroll (mouse wheel, touch, scrollbar) to work as expected
-// - window-size latest: when multiple clients (web UI + local terminal) attach,
-//   use the most recently attached client's size
 try {
     fs.writeFileSync(TMUX_CONF_PATH, [
         'set -g mouse off',
@@ -224,8 +222,6 @@ try {
         'set -g escape-time 0',
         'set -g default-terminal "xterm-256color"',
         'set -g terminal-overrides "xterm-256color:smcup@:rmcup@"',
-        'set -g window-size latest',
-        'set -g aggressive-resize on',
         ''
     ].join('\n'));
 } catch {}
