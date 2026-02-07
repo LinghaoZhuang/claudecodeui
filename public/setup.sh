@@ -304,6 +304,8 @@ set -g history-limit 50000
 set -g escape-time 0
 set -g default-terminal "xterm-256color"
 set -g terminal-overrides "xterm-256color:smcup@:rmcup@"
+set -g window-size latest
+set -g aggressive-resize on
 TC
 
 session_name() {
