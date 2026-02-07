@@ -1365,7 +1365,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: existingSession.keepAlive || false,
                         tmuxSession: existingSession.dtachSocket ? tmuxName : null,
-                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r winch` : null,
+                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r ctrl_l` : null,
                         reattached: false
                     }));
 
@@ -1410,11 +1410,18 @@ function handleShellConnection(ws) {
                     console.log('[dtach] Reattach PTY started, PID:', shellProcess.pid);
 
                     // Force resize after reattach so child process gets correct dimensions
+                    // Then send Ctrl+L to trigger TUI full redraw (Claude CLI etc.)
                     setTimeout(() => {
                         if (shellProcess && shellProcess.resize) {
                             shellProcess.resize(termCols, termRows);
                             console.log(`[dtach] Forced resize after reattach: ${termCols}x${termRows}`);
                         }
+                        setTimeout(() => {
+                            if (shellProcess && shellProcess.write) {
+                                shellProcess.write('\x0c');
+                                console.log('[dtach] Sent Ctrl+L for TUI redraw');
+                            }
+                        }, 200);
                     }, 300);
 
                     // Restore keepAlive state from persistent set
@@ -1435,7 +1442,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: restoredKeepAlive,
                         tmuxSession: tmuxName,
-                        attachCommand: `dtach -a ${dtachSocket} -r winch`,
+                        attachCommand: `dtach -a ${dtachSocket} -r ctrl_l`,
                         reattached: true
                     }));
 
@@ -1653,7 +1660,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: false,
                         tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
-                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r winch` : null,
+                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r ctrl_l` : null,
                         reattached: false
                     }));
 
@@ -1828,7 +1835,7 @@ function handleShellConnection(ws) {
                                     type: 'session_info',
                                     keepAlive: session.keepAlive,
                                     tmuxSession: session.dtachSocket ? getDtachSessionName(ptySessionKey) : null,
-                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket}` : null,
+                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket} -r ctrl_l` : null,
                                     reattached: false
                                 }));
                             }
