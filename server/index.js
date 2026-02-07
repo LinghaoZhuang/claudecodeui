@@ -74,6 +74,7 @@ import userRoutes from './routes/user.js';
 import codexRoutes from './routes/codex.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import { userDb } from './database/db.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { TunnelManager, TunnelClient, createRequestRouter } from './cluster/index.js';
 import createClusterRoutes from './routes/cluster.js';
@@ -347,12 +348,20 @@ const wss = new WebSocketServer({
         const clusterInternalAuth = info.req.headers['x-cluster-internal-auth'];
         const clusterSecret = process.env.CLUSTER_SECRET;
         if (clusterInternalAuth && clusterSecret && clusterInternalAuth === clusterSecret) {
-            const user = authenticateWebSocket(null); // Get first user
-            if (user) {
-                info.req.user = user;
-                console.log('[OK] WebSocket authenticated via cluster internal auth');
-                return true;
+            try {
+                const user = userDb.getFirstUser();
+                if (user) {
+                    info.req.user = { userId: user.id, username: user.username };
+                    console.log('[OK] WebSocket authenticated via cluster internal auth');
+                    return true;
+                }
+            } catch (err) {
+                console.error('Cluster internal WS auth: failed to get local user:', err);
             }
+            // Fallback
+            info.req.user = { userId: 1, username: 'cluster-internal' };
+            console.log('[OK] WebSocket authenticated via cluster internal auth (fallback)');
+            return true;
         }
 
         // Extract token from query parameters or headers
