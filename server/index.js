@@ -1365,7 +1365,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: existingSession.keepAlive || false,
                         tmuxSession: existingSession.dtachSocket ? tmuxName : null,
-                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r ctrl_l` : null,
+                        attachCommand: existingSession.dtachSocket ? `dtach -a ${existingSession.dtachSocket} -r winch` : null,
                         reattached: false
                     }));
 
@@ -1442,7 +1442,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: restoredKeepAlive,
                         tmuxSession: tmuxName,
-                        attachCommand: `dtach -a ${dtachSocket} -r ctrl_l`,
+                        attachCommand: `dtach -a ${dtachSocket} -r winch`,
                         reattached: true
                     }));
 
@@ -1660,7 +1660,7 @@ function handleShellConnection(ws) {
                         type: 'session_info',
                         keepAlive: false,
                         tmuxSession: os.platform() !== 'win32' ? tmuxName : null,
-                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r ctrl_l` : null,
+                        attachCommand: os.platform() !== 'win32' ? `dtach -a ${dtachSocket} -r winch` : null,
                         reattached: false
                     }));
 
@@ -1835,7 +1835,7 @@ function handleShellConnection(ws) {
                                     type: 'session_info',
                                     keepAlive: session.keepAlive,
                                     tmuxSession: session.dtachSocket ? getDtachSessionName(ptySessionKey) : null,
-                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket} -r ctrl_l` : null,
+                                    attachCommand: session.dtachSocket ? `dtach -a ${session.dtachSocket} -r winch` : null,
                                     reattached: false
                                 }));
                             }
