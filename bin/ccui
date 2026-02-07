@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# ccui - Start or attach to a Claude Code UI tmux session
+#
+# Usage:
+#   ccui [project-path]     Start Claude in a tmux session for the project
+#   ccui -t [project-path]  Start a plain terminal (no Claude)
+#   ccui -l                 List active ccui sessions
+#
+# The session name is deterministic: same project path always gets the same
+# tmux session. Web UI detects and attaches to the same session automatically.
+#
+# Uses tmux socket "ccui" (-L ccui), isolated from your personal tmux sessions.
+
+set -euo pipefail
+
+TMUX_SOCKET="ccui"
+CONF="/tmp/ccui-tmux.conf"
+
+# Ensure tmux config exists (same settings as web UI server)
+ensure_config() {
+    [ -f "$CONF" ] || cat > "$CONF" << 'TMUX_CONF'
+set -g mouse off
+set -g status off
+set -g history-limit 50000
+set -g escape-time 0
+set -g default-terminal "xterm-256color"
+set -g terminal-overrides "xterm-256color:smcup@:rmcup@"
+set -g window-size latest
+set -g aggressive-resize on
+TMUX_CONF
+}
+
+# Compute session name (must match server/index.js getTmuxSessionName)
+session_name() {
+    local key="$1"
+    local type="$2"  # t=terminal, s=claude
+    local hash
+    hash=$(printf '%s' "$key" | sha256sum | cut -c1-6)
+    echo "cc${type}_${hash}"
+}
+
+# List sessions
+if [ "${1:-}" = "-l" ]; then
+    echo "Active ccui sessions:"
+    tmux -L "$TMUX_SOCKET" list-sessions 2>/dev/null || echo "  (none)"
+    exit 0
+fi
+
+# Parse mode
+MODE="s"  # default: claude
+if [ "${1:-}" = "-t" ]; then
+    MODE="t"
+    shift
+fi
+
+# Resolve project path
+PROJECT_PATH="${1:-.}"
+PROJECT_PATH="$(cd "$PROJECT_PATH" 2>/dev/null && pwd)" || {
+    echo "Error: invalid path: ${1:-.}" >&2
+    exit 1
+}
+
+# Compute key (must match server/index.js ptySessionKey)
+if [ "$MODE" = "t" ]; then
+    KEY="plain_${PROJECT_PATH}"
+else
+    KEY="${PROJECT_PATH}_default"
+fi
+
+SESSION_NAME=$(session_name "$KEY" "$MODE")
+
+ensure_config
+
+# Attach if session already exists
+if tmux -L "$TMUX_SOCKET" has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo "Attaching to existing session: $SESSION_NAME"
+    exec tmux -L "$TMUX_SOCKET" attach-session -t "$SESSION_NAME"
+fi
+
+# Create new session
+if [ "$MODE" = "s" ]; then
+    exec tmux -L "$TMUX_SOCKET" -f "$CONF" new-session -s "$SESSION_NAME" -c "$PROJECT_PATH" \
+        "bash -l -c 'claude --dangerously-skip-permissions'"
+else
+    exec tmux -L "$TMUX_SOCKET" -f "$CONF" new-session -s "$SESSION_NAME" -c "$PROJECT_PATH"
+fi

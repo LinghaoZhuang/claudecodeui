@@ -214,6 +214,8 @@ const TMUX_CONF_PATH = path.join(os.tmpdir(), 'ccui-tmux.conf');
 // - status off: web UI has its own controls, no need for tmux status bar
 // - smcup@/rmcup@: disable alternate screen so output flows into xterm.js scrollback buffer,
 //   enabling native scroll (mouse wheel, touch, scrollbar) to work as expected
+// - window-size latest: when multiple clients (web UI + local terminal) attach,
+//   use the most recently attached client's size
 try {
     fs.writeFileSync(TMUX_CONF_PATH, [
         'set -g mouse off',
@@ -222,12 +224,15 @@ try {
         'set -g escape-time 0',
         'set -g default-terminal "xterm-256color"',
         'set -g terminal-overrides "xterm-256color:smcup@:rmcup@"',
+        'set -g window-size latest',
+        'set -g aggressive-resize on',
         ''
     ].join('\n'));
 } catch {}
 
-function getTmuxSessionName(ptySessionKey) {
-    return `cc_${crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 4)}`;
+function getTmuxSessionName(ptySessionKey, type = 's') {
+    const prefix = type === 't' ? 'cct' : 'ccs';
+    return `${prefix}_${crypto.createHash('sha256').update(ptySessionKey).digest('hex').slice(0, 6)}`;
 }
 
 function tmuxSessionExists(sessionName) {
@@ -247,7 +252,7 @@ function killTmuxSession(sessionName) {
 function listCcuiTmuxSessions() {
     try {
         const output = execSync(`tmux -L ${TMUX_SOCKET} list-sessions -F '#{session_name}' 2>/dev/null`, { encoding: 'utf8' });
-        return output.trim().split('\n').filter(s => s.startsWith('cc_'));
+        return output.trim().split('\n').filter(s => s.startsWith('cct_') || s.startsWith('ccs_'));
     } catch { return []; }
 }
 
@@ -301,7 +306,7 @@ setInterval(() => {
 setTimeout(() => {
     const orphans = listCcuiTmuxSessions();
     if (orphans.length > 0) {
-        console.log(`[tmux startup] Found ${orphans.length} orphaned cc_* session(s), cleaning up...`);
+        console.log(`[tmux startup] Found ${orphans.length} orphaned ccui session(s), cleaning up...`);
         for (const tmuxName of orphans) {
             killTmuxSession(tmuxName);
         }
@@ -1269,8 +1274,14 @@ function handleShellConnection(ws) {
                     ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
                     : '';
                 const shellPrefix = isPlainShell ? 'plain_' : '';
-                ptySessionKey = `${shellPrefix}${projectPath}_${sessionId || 'default'}${commandSuffix}`;
-                const tmuxName = getTmuxSessionName(ptySessionKey);
+                // Terminal: one per project (no sessionId). Claude: per session.
+                if (isPlainShell) {
+                    ptySessionKey = `plain_${projectPath}${commandSuffix}`;
+                } else {
+                    ptySessionKey = `${projectPath}_${sessionId || 'default'}${commandSuffix}`;
+                }
+                const tmuxType = isPlainShell ? 't' : 's';
+                const tmuxName = getTmuxSessionName(ptySessionKey, tmuxType);
 
                 // Kill any existing login session before starting fresh
                 if (isLoginCommand) {
@@ -1286,9 +1297,10 @@ function handleShellConnection(ws) {
 
                 // Re-key: if client has a real sessionId but no matching PTY session,
                 // check if there's a '_default' session for the same project (new session that hasn't been mapped yet)
+                // Only applies to Claude sessions (terminals are per-project, no sessionId)
                 let existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
-                if (!existingSession && !isLoginCommand && sessionId && sessionId !== 'default') {
-                    const defaultKey = `${shellPrefix}${projectPath}_default${commandSuffix}`;
+                if (!existingSession && !isLoginCommand && !isPlainShell && sessionId && sessionId !== 'default') {
+                    const defaultKey = `${projectPath}_default${commandSuffix}`;
                     const defaultSession = ptySessionsMap.get(defaultKey);
                     if (defaultSession) {
                         console.log(`🔀 Re-keying PTY session: ${defaultKey} → ${ptySessionKey}`);
@@ -1379,11 +1391,11 @@ function handleShellConnection(ws) {
                 }
 
                 // Check for orphaned tmux session (node-pty gone but tmux session still alive)
-                // Also check default key's tmux session if sessionId is real
+                // Also check default key's tmux session if sessionId is real (Claude only)
                 let effectiveTmuxName = tmuxName;
-                if (!isLoginCommand && sessionId && sessionId !== 'default' && !tmuxSessionExists(tmuxName)) {
-                    const defaultKey = `${shellPrefix}${projectPath}_default${commandSuffix}`;
-                    const defaultTmuxName = getTmuxSessionName(defaultKey);
+                if (!isLoginCommand && !isPlainShell && sessionId && sessionId !== 'default' && !tmuxSessionExists(tmuxName)) {
+                    const defaultKey = `${projectPath}_default${commandSuffix}`;
+                    const defaultTmuxName = getTmuxSessionName(defaultKey, 's');
                     if (tmuxSessionExists(defaultTmuxName)) {
                         effectiveTmuxName = defaultTmuxName;
                         console.log(`[tmux] Found orphaned session under default key: ${defaultTmuxName}`);
