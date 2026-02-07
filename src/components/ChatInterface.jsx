@@ -98,6 +98,9 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
   const isLoadingMoreRef = useRef(false);
   const topLoadLockRef = useRef(false);
   const pendingScrollRestoreRef = useRef(null);
+  // Track window focus for notifications (document.hidden misses alt-tab/window switch)
+  const windowFocusedRef = useRef(document.hasFocus());
+
   // Streaming throttle buffers
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef(null);
@@ -138,6 +141,18 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
     streamBufferRef.current = '';
   }, []);
   // Load permission mode for the current session
+  // Track window focus/blur for notification triggering
+  useEffect(() => {
+    const onFocus = () => { windowFocusedRef.current = true; };
+    const onBlur = () => { windowFocusedRef.current = false; };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   useEffect(() => {
     if (selectedSession?.id) {
       const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`);
@@ -2085,7 +2100,8 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, late
 
         case 'task-complete-notification':
           // Notification from Stop hook via API
-          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          // Trigger when page is hidden OR window lost focus (alt-tab, other app)
+          if ((document.hidden || !windowFocusedRef.current) && 'Notification' in window && Notification.permission === 'granted') {
             const n = new Notification('Claude 任务完成', {
               body: latestMessage.message || 'Claude Code 任务已完成',
               tag: 'claude-complete-' + Date.now(),
