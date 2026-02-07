@@ -114,22 +114,49 @@ step_prerequisites() {
         success "Node.js $(node --version) 安装完成"
     fi
 
-    # tmux
+    # tmux (需要 3.1+ 支持 window-size latest)
+    local TMUX_MIN="3.1"
+    local need_tmux=false
+
     if $HAS_TMUX; then
-        success "tmux $(tmux -V)"
-    else
-        info "安装 tmux ..."
-        if command -v apt-get &>/dev/null; then
-            sudo apt-get install -y tmux 2>/dev/null
-        elif command -v yum &>/dev/null; then
-            sudo yum install -y tmux 2>/dev/null
-        elif command -v brew &>/dev/null; then
-            brew install tmux 2>/dev/null
+        local tmux_ver
+        tmux_ver=$(tmux -V | grep -oP '[\d.]+[a-z]?' | head -1)
+        # 只比较数字部分
+        local tmux_num="${tmux_ver%%[a-z]*}"
+        if awk "BEGIN{exit !($tmux_num < $TMUX_MIN)}"; then
+            warn "tmux ${tmux_ver} 版本过低 (需要 >= ${TMUX_MIN})"
+            need_tmux=true
         else
-            fail "无法自动安装 tmux，请手动安装"
-            return 1
+            success "tmux ${tmux_ver}"
         fi
-        success "tmux $(tmux -V) 安装完成"
+    else
+        need_tmux=true
+    fi
+
+    if $need_tmux; then
+        info "从源码编译安装 tmux 3.5a 到 ~/.local ..."
+        local build_dir="/tmp/tmux-build-$$"
+        mkdir -p "$build_dir"
+
+        # 安装编译依赖
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get install -y libevent-dev ncurses-dev build-essential bison pkg-config 2>/dev/null || true
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y libevent-devel ncurses-devel gcc make bison pkg-config 2>/dev/null || true
+        fi
+
+        (
+            cd "$build_dir" && \
+            curl -sL https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz | tar xz && \
+            cd tmux-3.5a && \
+            ./configure --prefix="$HOME/.local" >/dev/null 2>&1 && \
+            make -j"$(nproc)" >/dev/null 2>&1 && \
+            make install >/dev/null 2>&1
+        ) || { fail "tmux 编译失败，请检查编译依赖"; rm -rf "$build_dir"; return 1; }
+
+        rm -rf "$build_dir"
+        hash -r
+        success "tmux $(tmux -V) 编译安装完成 (~/.local/bin/tmux)"
     fi
 }
 
